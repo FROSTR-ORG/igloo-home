@@ -1,0 +1,35 @@
+[package]
+name = "igloo-home"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "igloo_home_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+argon2 = "0.5"
+base64 = "0.22"
+bech32 = "0.11"
+chacha20poly1305 = "0.10"
+hex = "0.4"
+rand_core = { version = "0.6", features = ["getrandom"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+frost-secp256k1-tr-unofficial = "2.2.0"
+bifrost-app = { path = "../../bifrost-rs/crates/bifrost-app" }
+bifrost-bridge-tokio = { path = "../../bifrost-rs/crates/bifrost-bridge-tokio" }
+bifrost-codec = { path = "../../bifrost-rs/crates/bifrost-codec" }
+bifrost-core = { path = "../../bifrost-rs/crates/bifrost-core" }
+bifrost-signer = { path = "../../bifrost-rs/crates/bifrost-signer" }
+frostr-utils = { path = "../../bifrost-rs/crates/frostr-utils" }
+igloo-shell-core = { path = "../../igloo-shell/crates/igloo-shell-core" }

@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+
+# Tauri build output and generated bindings
+src-tauri/target/
+src-tauri/gen/
+
+# Environment and local app state
+.env
+.env.*
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs and diagnostics
+*.log
+logs/

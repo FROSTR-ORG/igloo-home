@@ -3,31 +3,26 @@ mod models;
 mod paths;
 mod profiles;
 mod session;
+mod session_log;
 mod settings;
-mod share_store;
 mod test_mode;
 
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use bifrost_core::types::PeerPolicy;
 use models::{
-    AcceptOnboardingPackageInput, AppPathsResponse, AppSettings, AppSettingsEvent,
-    DeleteShareInput, ExportProfileInput, ExportShareFileInput, ImportProfileFromOnboardingInput,
-    ImportProfileFromRawInput, ImportShareFileInput, ListSessionLogsInput, OverwriteShareInput,
-    ProfileRuntimeSnapshot, RecoverKeyRequest, RemoveProfileInput, ResolveCloseRequestInput,
-    SetPeerPolicyRequest, SettingsUpdateInput, ShareSummary, SignerSnapshot,
-    StartProfileSessionRequest, StartSignerRequest, UnlockShareInput,
+    AppPathsResponse, AppSettings, AppSettingsEvent, ExportProfileInput, ExportProfilePackageInput,
+    ImportProfileFromBfprofileInput, ImportProfileFromOnboardingInput, ImportProfileFromRawInput,
+    ListSessionLogsInput, ProfileRuntimeSnapshot, PublishProfileBackupInput,
+    RecoverProfileFromBfshareInput, RemoveProfileInput, ResolveCloseRequestInput,
+    SettingsUpdateInput, StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
 };
 use paths::AppPaths;
 use session::{
-    AppState, load_last_session, make_app_state, maybe_handle_close_request, request_resume,
+    AppState, load_last_session, make_app_state, maybe_handle_close_request,
 };
+use session_log::read_session_log;
 use settings::{apply_launch_on_login, load_settings, save_settings};
-use share_store::{
-    ShareSaveRequest, delete_share as delete_local_share, emit_inventory, export_share_file,
-    import_share_file, list_shares, overwrite_share, read_session_log, save_share, unlock_share,
-};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Manager};
@@ -37,7 +32,6 @@ use tauri_plugin_autostart::MacosLauncher;
 const TRAY_ID: &str = "main-tray";
 const MENU_SHOW: &str = "tray.show";
 const MENU_HIDE: &str = "tray.hide";
-const MENU_START_LAST: &str = "tray.start_last";
 const MENU_STOP: &str = "tray.stop";
 const MENU_QUIT: &str = "tray.quit";
 
@@ -97,6 +91,39 @@ async fn import_profile_from_onboarding_command(
 }
 
 #[tauri::command]
+async fn import_profile_from_bfprofile_command(
+    state: tauri::State<'_, AppState>,
+    input: ImportProfileFromBfprofileInput,
+) -> std::result::Result<igloo_shell_core::shell::ProfileImportResult, String> {
+    profiles::import_profile_from_bfprofile(
+        &state.shell_paths,
+        input.label,
+        input.relay_profile,
+        Some(input.vault_passphrase),
+        input.package_password,
+        &input.package,
+    )
+    .map_err(error_message)
+}
+
+#[tauri::command]
+async fn recover_profile_from_bfshare_command(
+    state: tauri::State<'_, AppState>,
+    input: RecoverProfileFromBfshareInput,
+) -> std::result::Result<igloo_shell_core::shell::ProfileImportResult, String> {
+    profiles::recover_profile_from_bfshare(
+        &state.shell_paths,
+        input.label,
+        input.relay_profile,
+        Some(input.vault_passphrase),
+        input.package_password,
+        &input.package,
+    )
+    .await
+    .map_err(error_message)
+}
+
+#[tauri::command]
 async fn remove_profile_command(
     state: tauri::State<'_, AppState>,
     input: RemoveProfileInput,
@@ -119,106 +146,57 @@ async fn export_profile_command(
 }
 
 #[tauri::command]
-async fn list_shares_command(
+async fn export_profile_package_command(
     state: tauri::State<'_, AppState>,
-) -> std::result::Result<Vec<ShareSummary>, String> {
-    list_shares(&state.paths).map_err(error_message)
-}
-
-#[tauri::command]
-async fn save_share_command(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    input: models::SaveShareInput,
-) -> std::result::Result<models::ShareMetadata, String> {
-    let saved = save_share(
-        &state.paths,
-        ShareSaveRequest {
-            share_id: input.share_id,
-            name: input.name,
-            password: input.password,
-            group_package_json: input.group_package_json,
-            share_package_json: input.share_package_json,
-            relay_urls: input.relay_urls,
-            peer_pubkeys: input.peer_pubkeys,
-        },
-        false,
+    input: ExportProfilePackageInput,
+) -> std::result::Result<crate::models::ProfilePackageExportResult, String> {
+    let result = profiles::export_managed_profile_package(
+        &state.shell_paths,
+        &input.profile_id,
+        &input.format,
+        input.package_password,
+        Some(input.vault_passphrase),
     )
     .map_err(error_message)?;
-    emit_inventory(&app, &state.paths).map_err(error_message)?;
-    Ok(saved)
-}
-
-#[tauri::command]
-async fn overwrite_share_command(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    input: OverwriteShareInput,
-) -> std::result::Result<models::ShareMetadata, String> {
-    let saved = overwrite_share(
-        &state.paths,
-        ShareSaveRequest {
-            share_id: Some(input.share_id),
-            name: input.name,
-            password: input.password,
-            group_package_json: input.group_package_json,
-            share_package_json: input.share_package_json,
-            relay_urls: input.relay_urls,
-            peer_pubkeys: input.peer_pubkeys,
-        },
-    )
-    .map_err(error_message)?;
-    emit_inventory(&app, &state.paths).map_err(error_message)?;
-    Ok(saved)
-}
-
-#[tauri::command]
-async fn unlock_share_command(
-    state: tauri::State<'_, AppState>,
-    input: UnlockShareInput,
-) -> std::result::Result<models::UnlockedShare, String> {
-    unlock_share(&state.paths, input).map_err(|error| match error {
-        share_store::UnlockFailure::WrongPassword => "wrong password".to_string(),
-        share_store::UnlockFailure::CorruptFile(message) => message,
+    Ok(crate::models::ProfilePackageExportResult {
+        profile_id: result.profile_id,
+        format: result.format,
+        out_path: result.out_path,
+        package: result.package,
     })
 }
 
 #[tauri::command]
-async fn delete_share_command(
-    app: tauri::AppHandle,
+async fn publish_profile_backup_command(
     state: tauri::State<'_, AppState>,
-    input: DeleteShareInput,
-) -> std::result::Result<(), String> {
-    delete_local_share(&state.paths, &input.share_id).map_err(error_message)?;
-    emit_inventory(&app, &state.paths).map_err(error_message)?;
-    Ok(())
-}
-
-#[tauri::command]
-async fn import_share_file_command(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    input: ImportShareFileInput,
-) -> std::result::Result<ShareSummary, String> {
-    let imported = import_share_file(
-        &state.paths,
-        PathBuf::from(input.source_path).as_path(),
-        input.overwrite,
+    input: PublishProfileBackupInput,
+) -> std::result::Result<crate::models::ProfileBackupPublishResult, String> {
+    let result = profiles::publish_managed_profile_backup(
+        &state.shell_paths,
+        &input.profile_id,
+        Some(input.vault_passphrase),
     )
+    .await
     .map_err(error_message)?;
-    emit_inventory(&app, &state.paths).map_err(error_message)?;
-    Ok(imported)
+    Ok(crate::models::ProfileBackupPublishResult {
+        profile_id: result.profile_id,
+        relays: result.relays,
+        event_id: result.event_id,
+        author_pubkey: result.author_pubkey,
+    })
 }
 
 #[tauri::command]
-async fn export_share_file_command(
+async fn update_profile_operator_settings_command(
     state: tauri::State<'_, AppState>,
-    input: ExportShareFileInput,
-) -> std::result::Result<(), String> {
-    export_share_file(
-        &state.paths,
-        &input.share_id,
-        PathBuf::from(input.destination_path).as_path(),
+    input: UpdateProfileOperatorSettingsInput,
+) -> std::result::Result<igloo_shell_core::shell::ProfileManifest, String> {
+    profiles::update_managed_profile_settings(
+        &state.shell_paths,
+        &input.profile_id,
+        input.label,
+        input.relays,
+        input.runtime_options,
     )
     .map_err(error_message)
 }
@@ -235,21 +213,6 @@ async fn create_imported_keyset_command(
     input: models::CreateImportedKeysetRequest,
 ) -> std::result::Result<models::GeneratedKeyset, String> {
     session::make_imported_keyset(input.threshold, input.count, &input.nsec).map_err(error_message)
-}
-
-#[tauri::command]
-async fn accept_onboarding_package_command(
-    input: AcceptOnboardingPackageInput,
-) -> std::result::Result<models::AcceptedOnboardingPackage, String> {
-    session::accept_onboarding_package(&input.package, &input.password).map_err(error_message)
-}
-
-#[tauri::command]
-async fn recover_nsec_command(
-    input: RecoverKeyRequest,
-) -> std::result::Result<models::RecoveredKey, String> {
-    session::recover_nsec(&input.group_package_json, &input.share_package_jsons)
-        .map_err(error_message)
 }
 
 #[tauri::command]
@@ -277,29 +240,6 @@ async fn profile_runtime_snapshot_command(
 }
 
 #[tauri::command]
-async fn start_signer_command(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    input: StartSignerRequest,
-) -> std::result::Result<SignerSnapshot, String> {
-    let snapshot = session::start_signer(&app, state.inner(), input)
-        .await
-        .map_err(error_message)?;
-    sync_tray(&app).map_err(error_message)?;
-    Ok(snapshot)
-}
-
-#[tauri::command]
-async fn signer_status_command(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-) -> std::result::Result<SignerSnapshot, String> {
-    session::snapshot(&app, state.inner())
-        .await
-        .map_err(error_message)
-}
-
-#[tauri::command]
 async fn stop_signer_command(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -309,46 +249,6 @@ async fn stop_signer_command(
         .map_err(error_message)?;
     sync_tray(&app).map_err(error_message)?;
     Ok(())
-}
-
-#[tauri::command]
-async fn set_peer_policy_command(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
-    input: SetPeerPolicyRequest,
-) -> std::result::Result<SignerSnapshot, String> {
-    let bridge = {
-        let guard = state.signer.lock().unwrap();
-        guard
-            .active
-            .as_ref()
-            .map(|active| active.bridge.clone())
-            .ok_or_else(|| "no active signer session".to_string())?
-    };
-    let policy = PeerPolicy {
-        block_all: input.block_all,
-        request: bifrost_core::types::MethodPolicy {
-            echo: true,
-            ping: input.allow_ping,
-            onboard: input.allow_onboard,
-            sign: input.allow_sign,
-            ecdh: input.allow_ecdh,
-        },
-        respond: bifrost_core::types::MethodPolicy {
-            echo: true,
-            ping: input.allow_ping,
-            onboard: input.allow_onboard,
-            sign: input.allow_sign,
-            ecdh: input.allow_ecdh,
-        },
-    };
-    bridge
-        .set_policy(input.peer, policy)
-        .await
-        .map_err(error_message)?;
-    session::snapshot(&app, state.inner())
-        .await
-        .map_err(error_message)
 }
 
 #[tauri::command]
@@ -367,7 +267,6 @@ async fn update_settings_command(
     let settings = AppSettings {
         close_to_tray: input.close_to_tray,
         launch_on_login: input.launch_on_login,
-        reopen_last_session: input.reopen_last_session,
     };
     save_settings(&state.paths, &settings).map_err(error_message)?;
     apply_launch_on_login(&app, &settings).map_err(error_message)?;
@@ -438,9 +337,7 @@ fn show_main_window(app: &tauri::AppHandle) -> Result<()> {
 fn sync_tray(app: &tauri::AppHandle) -> Result<()> {
     let state = app.state::<AppState>();
     let signer = state.signer.lock().unwrap();
-    let settings = state.settings.lock().unwrap().clone();
     let has_active = signer.active.is_some();
-    let can_resume = !has_active && settings.reopen_last_session && signer.last_session.is_some();
     drop(signer);
 
     if app.tray_by_id(TRAY_ID).is_some() {
@@ -449,13 +346,6 @@ fn sync_tray(app: &tauri::AppHandle) -> Result<()> {
 
     let show = MenuItem::with_id(app, MENU_SHOW, "Show Igloo Home", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, MENU_HIDE, "Hide Window", true, None::<&str>)?;
-    let start_last = MenuItem::with_id(
-        app,
-        MENU_START_LAST,
-        "Start Last Session",
-        can_resume,
-        None::<&str>,
-    )?;
     let stop = MenuItem::with_id(app, MENU_STOP, "Stop Signer", has_active, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
@@ -463,7 +353,6 @@ fn sync_tray(app: &tauri::AppHandle) -> Result<()> {
         &[
             &show,
             &hide,
-            &start_last,
             &stop,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -502,11 +391,6 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
             }
-        }
-        MENU_START_LAST => {
-            let state = app.state::<AppState>();
-            let _ = show_main_window(app);
-            let _ = request_resume(app, state.inner());
         }
         MENU_STOP => {
             let app = app.clone();
@@ -561,7 +445,6 @@ pub fn run() {
         .manage(app_state)
         .setup(move |app| {
             apply_launch_on_login(&app.handle(), &settings)?;
-            emit_inventory(&app.handle(), &paths)?;
             if paths::is_test_mode() {
                 test_mode::start_server(&app.handle())?;
             }
@@ -596,25 +479,18 @@ pub fn run() {
             list_relay_profiles_command,
             import_profile_from_raw_command,
             import_profile_from_onboarding_command,
+            import_profile_from_bfprofile_command,
+            recover_profile_from_bfshare_command,
             remove_profile_command,
             export_profile_command,
-            list_shares_command,
-            save_share_command,
-            overwrite_share_command,
-            unlock_share_command,
-            delete_share_command,
-            import_share_file_command,
-            export_share_file_command,
+            export_profile_package_command,
+            publish_profile_backup_command,
+            update_profile_operator_settings_command,
             create_generated_keyset_command,
             create_imported_keyset_command,
-            accept_onboarding_package_command,
-            recover_nsec_command,
             start_profile_session_command,
             profile_runtime_snapshot_command,
-            start_signer_command,
-            signer_status_command,
             stop_signer_command,
-            set_peer_policy_command,
             get_settings_command,
             update_settings_command,
             list_session_logs_command,

@@ -1,21 +1,25 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  AcceptedOnboardingPackage,
   AppPathsResponse,
   AppSettings,
   GeneratedKeyset,
+  ProfileBackupPublishResult,
   ProfileExportResult,
   ProfileImportResult,
   ProfileManifest,
+  ProfilePackageExportResult,
   ProfileRuntimeSnapshot,
-  RecoveredKey,
   RelayProfile,
-  ShareMetadata,
-  ShareSummary,
   SignerLogEntry,
-  SignerSnapshot,
-  UnlockedShare,
 } from '@/lib/types';
+
+function normalizeHomeImportError(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/already exists/i.test(message)) {
+    throw new Error('Device profile already exists. Delete the existing device profile before importing this share.');
+  }
+  throw error;
+}
 
 export function appPaths() {
   return invoke<AppPathsResponse>('app_paths');
@@ -46,7 +50,7 @@ export function importProfileFromRaw(input: {
       group_package_json: input.groupPackageJson,
       share_package_json: input.sharePackageJson,
     },
-  });
+  }).catch(normalizeHomeImportError);
 }
 
 export function importProfileFromOnboarding(input: {
@@ -64,7 +68,43 @@ export function importProfileFromOnboarding(input: {
       onboarding_password: input.onboardingPassword,
       package: input.package,
     },
-  });
+  }).catch(normalizeHomeImportError);
+}
+
+export function importProfileFromBfprofile(input: {
+  label?: string;
+  relayProfile?: string | null;
+  vaultPassphrase: string;
+  packagePassword: string;
+  packageText: string;
+}) {
+  return invoke<ProfileImportResult>('import_profile_from_bfprofile_command', {
+    input: {
+      label: input.label ?? null,
+      relay_profile: input.relayProfile ?? null,
+      vault_passphrase: input.vaultPassphrase,
+      package_password: input.packagePassword,
+      package: input.packageText,
+    },
+  }).catch(normalizeHomeImportError);
+}
+
+export function recoverProfileFromBfshare(input: {
+  label?: string;
+  relayProfile?: string | null;
+  vaultPassphrase: string;
+  packagePassword: string;
+  packageText: string;
+}) {
+  return invoke<ProfileImportResult>('recover_profile_from_bfshare_command', {
+    input: {
+      label: input.label ?? null,
+      relay_profile: input.relayProfile ?? null,
+      vault_passphrase: input.vaultPassphrase,
+      package_password: input.packagePassword,
+      package: input.packageText,
+    },
+  }).catch(normalizeHomeImportError);
 }
 
 export function removeProfile(profileId: string) {
@@ -87,85 +127,27 @@ export function exportProfile(input: {
   });
 }
 
-export function listShares() {
-  return invoke<ShareSummary[]>('list_shares_command');
-}
-
-export function saveShare(input: {
-  shareId?: string;
-  name: string;
-  password: string;
-  groupPackageJson: string;
-  sharePackageJson: string;
-  relayUrls: string[];
-  peerPubkeys: string[];
+export function exportProfilePackage(input: {
+  profileId: string;
+  packagePassword: string;
+  vaultPassphrase: string;
+  format: 'bfprofile' | 'bfshare';
 }) {
-  return invoke<ShareMetadata>('save_share_command', {
+  return invoke<ProfilePackageExportResult>('export_profile_package_command', {
     input: {
-      share_id: input.shareId ?? null,
-      name: input.name,
-      password: input.password,
-      group_package_json: input.groupPackageJson,
-      share_package_json: input.sharePackageJson,
-      relay_urls: input.relayUrls,
-      peer_pubkeys: input.peerPubkeys,
+      profile_id: input.profileId,
+      package_password: input.packagePassword,
+      vault_passphrase: input.vaultPassphrase,
+      format: input.format,
     },
   });
 }
 
-export function overwriteShare(input: {
-  shareId: string;
-  name: string;
-  password: string;
-  groupPackageJson: string;
-  sharePackageJson: string;
-  relayUrls: string[];
-  peerPubkeys: string[];
-}) {
-  return invoke<ShareMetadata>('overwrite_share_command', {
+export function publishProfileBackup(input: { profileId: string; vaultPassphrase: string }) {
+  return invoke<ProfileBackupPublishResult>('publish_profile_backup_command', {
     input: {
-      share_id: input.shareId,
-      name: input.name,
-      password: input.password,
-      group_package_json: input.groupPackageJson,
-      share_package_json: input.sharePackageJson,
-      relay_urls: input.relayUrls,
-      peer_pubkeys: input.peerPubkeys,
-    },
-  });
-}
-
-export function unlockShare(shareId: string, password: string) {
-  return invoke<UnlockedShare>('unlock_share_command', {
-    input: {
-      share_id: shareId,
-      password,
-    },
-  });
-}
-
-export function deleteShare(shareId: string) {
-  return invoke<void>('delete_share_command', {
-    input: {
-      share_id: shareId,
-    },
-  });
-}
-
-export function importShareFile(sourcePath: string, overwrite = false) {
-  return invoke<ShareSummary>('import_share_file_command', {
-    input: {
-      source_path: sourcePath,
-      overwrite,
-    },
-  });
-}
-
-export function exportShareFile(shareId: string, destinationPath: string) {
-  return invoke<void>('export_share_file_command', {
-    input: {
-      share_id: shareId,
-      destination_path: destinationPath,
+      profile_id: input.profileId,
+      vault_passphrase: input.vaultPassphrase,
     },
   });
 }
@@ -180,28 +162,6 @@ export function createImportedKeyset(threshold: number, count: number, nsec: str
   return invoke<GeneratedKeyset>('create_imported_keyset_command', {
     input: { threshold, count, nsec },
   });
-}
-
-export function acceptOnboardingPackage(pkg: string, password: string) {
-  return invoke<AcceptedOnboardingPackage>('accept_onboarding_package_command', {
-    input: {
-      package: pkg,
-      password,
-    },
-  });
-}
-
-export function recoverNsec(groupPackageJson: string, sharePackageJsons: string[]) {
-  return invoke<RecoveredKey>('recover_nsec_command', {
-    input: {
-      group_package_json: groupPackageJson,
-      share_package_jsons: sharePackageJsons,
-    },
-  });
-}
-
-export function signerStatus() {
-  return invoke<SignerSnapshot>('signer_status_command');
 }
 
 export function profileRuntimeSnapshot(profileId?: string | null) {
@@ -219,42 +179,46 @@ export function startProfileSession(input: { profileId: string; vaultPassphrase:
   });
 }
 
-export function startSigner(input: {
-  shareId: string;
-  password: string;
-  relayUrls: string[];
-  peerPubkeys: string[];
-}) {
-  return invoke<SignerSnapshot>('start_signer_command', {
-    input: {
-      share_id: input.shareId,
-      password: input.password,
-      relay_urls: input.relayUrls,
-      peer_pubkeys: input.peerPubkeys,
-    },
-  });
-}
-
 export function stopSigner() {
   return invoke<void>('stop_signer_command');
 }
 
-export function setPeerPolicy(input: {
-  peer: string;
-  blockAll: boolean;
-  allowPing: boolean;
-  allowOnboard: boolean;
-  allowSign: boolean;
-  allowEcdh: boolean;
+export function updateProfileOperatorSettings(input: {
+  profileId: string;
+  label: string;
+  relays: string[];
+  runtimeOptions: {
+    sign_timeout_secs: number;
+    ecdh_timeout_secs: number;
+    ping_timeout_secs: number;
+    onboard_timeout_secs: number;
+    request_ttl_secs: number;
+    max_future_skew_secs: number;
+    request_cache_limit: number;
+    ecdh_cache_capacity: number;
+    ecdh_cache_ttl_secs: number;
+    sig_cache_capacity: number;
+    sig_cache_ttl_secs: number;
+    state_save_interval_secs: number;
+    event_kind: number;
+    peer_selection_strategy: 'deterministic_sorted' | 'random';
+    router_expire_tick_ms: number;
+    router_relay_backoff_ms: number;
+    router_command_queue_capacity: number;
+    router_inbound_queue_capacity: number;
+    router_outbound_queue_capacity: number;
+    router_command_overflow_policy: 'fail' | 'drop_oldest';
+    router_inbound_overflow_policy: 'fail' | 'drop_oldest';
+    router_outbound_overflow_policy: 'fail' | 'drop_oldest';
+    router_inbound_dedupe_cache_limit: number;
+  };
 }) {
-  return invoke<SignerSnapshot>('set_peer_policy_command', {
+  return invoke<ProfileManifest>('update_profile_operator_settings_command', {
     input: {
-      peer: input.peer,
-      block_all: input.blockAll,
-      allow_ping: input.allowPing,
-      allow_onboard: input.allowOnboard,
-      allow_sign: input.allowSign,
-      allow_ecdh: input.allowEcdh,
+      profile_id: input.profileId,
+      label: input.label,
+      relays: input.relays,
+      runtime_options: input.runtimeOptions,
     },
   });
 }
@@ -268,7 +232,6 @@ export function updateSettings(settings: AppSettings) {
     input: {
       close_to_tray: settings.close_to_tray,
       launch_on_login: settings.launch_on_login,
-      reopen_last_session: settings.reopen_last_session,
     },
   });
 }

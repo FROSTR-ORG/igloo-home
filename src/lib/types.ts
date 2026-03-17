@@ -1,27 +1,3 @@
-export type ShareMetadata = {
-  share_id: string;
-  name: string;
-  member_idx: number;
-  threshold: number;
-  member_count: number;
-  group_public_key: string;
-  relay_urls: string[];
-  peer_pubkeys: string[];
-  created_at: number;
-  updated_at: number;
-};
-
-export type ShareSummary = {
-  metadata: ShareMetadata;
-  path: string;
-};
-
-export type UnlockedShare = {
-  metadata: ShareMetadata;
-  group_package_json: string;
-  share_package_json: string;
-};
-
 export type GeneratedKeysetShare = {
   name: string;
   member_idx: number;
@@ -38,47 +14,12 @@ export type GeneratedKeyset = {
   shares: GeneratedKeysetShare[];
 };
 
-export type RecoveredKey = {
-  nsec: string;
-  signing_key_hex: string;
-};
-
-export type AcceptedOnboardingPackage = {
-  share_package_json: string;
-  peer_pubkey: string;
-  relay_urls: string[];
-  challenge_hex32: string;
-  created_at: number;
-  expires_at: number;
-};
-
 export type DeviceStatus = {
   device_id: string;
   pending_ops: number;
   last_active: number;
   known_peers: number;
   request_seq: number;
-};
-
-export type PolicySnapshot = {
-  peer: string;
-  policy: {
-    block_all: boolean;
-    request: {
-      echo: boolean;
-      ping: boolean;
-      onboard: boolean;
-      sign: boolean;
-      ecdh: boolean;
-    };
-    respond: {
-      echo: boolean;
-      ping: boolean;
-      onboard: boolean;
-      sign: boolean;
-      ecdh: boolean;
-    };
-  };
 };
 
 export type SignerLogEntry = {
@@ -98,23 +39,9 @@ export type SessionResume = {
   last_stopped_at: number | null;
 };
 
-export type SignerSnapshot = {
-  active: boolean;
-  share_id: string | null;
-  share_name: string | null;
-  group_public_key: string | null;
-  relay_urls: string[];
-  peer_pubkeys: string[];
-  runtime_dir: string | null;
-  status: DeviceStatus | null;
-  policies: PolicySnapshot[];
-  logs: SignerLogEntry[];
-  last_session: SessionResume | null;
-};
-
 export type AppPathsResponse = {
   app_data_dir: string;
-  shares_dir: string;
+  profiles_dir: string;
   runtime_dir: string;
 };
 
@@ -179,14 +106,26 @@ export type ProfileExportResult = {
   share_path: string;
 };
 
+export type ProfilePackageExportResult = {
+  profile_id: string;
+  format: string;
+  out_path: string | null;
+  package: string;
+};
+
+export type ProfileBackupPublishResult = {
+  profile_id: string;
+  relays: string[];
+  event_id: string;
+  author_pubkey: string;
+};
+
 export type ProfileRuntimeSnapshot = {
   active: boolean;
   profile: ProfileManifest | null;
   runtime_status: unknown;
   readiness: unknown;
-  readiness_explanation: unknown;
   runtime_diagnostics: unknown;
-  policies: unknown;
   daemon_log_path: string | null;
   daemon_log_lines: string[];
   daemon_metadata: {
@@ -202,7 +141,6 @@ export type ProfileRuntimeSnapshot = {
 export type AppSettings = {
   close_to_tray: boolean;
   launch_on_login: boolean;
-  reopen_last_session: boolean;
 };
 
 export type SignerLifecycleEvent = {
@@ -218,20 +156,18 @@ export type SignerStatusEvent = {
   status: DeviceStatus;
 };
 
-export type SignerPoliciesEvent = {
-  policies: PolicySnapshot[];
-};
-
 export type SignerLogEvent = {
   entry: SignerLogEntry;
 };
 
-export type ShareInventoryEvent = {
-  shares: ShareSummary[];
-};
-
 export type AppSettingsEvent = {
   settings: AppSettings;
+};
+
+export type AppTestNavigateEvent = {
+  view: 'landing' | 'create' | 'load' | 'inventory' | 'dashboard' | 'settings';
+  profile_id?: string | null;
+  signer_tab?: 'signer' | 'permissions' | 'settings' | null;
 };
 
 export type CloseRequestEvent = {

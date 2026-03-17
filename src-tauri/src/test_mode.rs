@@ -5,13 +5,13 @@ use std::thread;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::models::{
     ExportProfileInput, ImportProfileFromOnboardingInput, ImportProfileFromRawInput,
     ListSessionLogsInput, RemoveProfileInput, StartProfileSessionRequest,
 };
-use crate::{profiles, session, share_store};
+use crate::{profiles, session, session_log};
 
 #[derive(Debug, Deserialize)]
 struct TestRequest {
@@ -27,6 +27,15 @@ struct TestResponse {
     ok: bool,
     result: Option<Value>,
     error: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct NavigateViewInput {
+    view: String,
+    #[serde(default)]
+    profile_id: Option<String>,
+    #[serde(default)]
+    signer_tab: Option<String>,
 }
 
 pub fn start_server(app: &AppHandle) -> anyhow::Result<()> {
@@ -164,8 +173,13 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
                     .map(|session| std::path::PathBuf::from(&session.runtime_dir))
                     .ok_or_else(|| anyhow::anyhow!("no session logs available"))?
             };
-            share_store::read_session_log(&runtime_dir, &state.paths)
+            session_log::read_session_log(&runtime_dir, &state.paths)
                 .and_then(|value| serde_json::to_value(value).map_err(Into::into))
+        })(),
+        "navigate_view" => (|| -> anyhow::Result<Value> {
+            let input: NavigateViewInput = serde_json::from_value(request.input)?;
+            app.emit(crate::events::EVENT_APP_TEST_NAVIGATE, &input)?;
+            Ok(serde_json::json!({ "navigated": true }))
         })(),
         _ => Err(anyhow::anyhow!(
             "unknown test command '{}'",

@@ -8,18 +8,13 @@ use std::sync::{
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, anyhow, bail};
-use bifrost_app::onboarding::explain_readiness;
 use bech32::{Bech32, Hrp};
 use bifrost_app::runtime::{
-    AppConfig, EncryptedFileStore, PeerConfig, ResolvedAppConfig, begin_run, complete_clean_run,
-    load_or_init_signer, load_or_init_signer_resolved,
+    EncryptedFileStore, ResolvedAppConfig, begin_run, complete_clean_run, load_or_init_signer_resolved,
 };
 use bifrost_bridge_tokio::{Bridge, BridgeConfig, NostrSdkAdapter};
-use bifrost_codec::{
-    decode_group_package_json, decode_share_package_json, encode_group_package_json,
-    encode_share_package_json,
-};
-use bifrost_core::types::{GroupPackage, PeerPolicy, SharePackage};
+use bifrost_codec::{encode_group_package_json, encode_share_package_json};
+use bifrost_core::types::{GroupPackage, SharePackage};
 use bifrost_signer::DeviceStore;
 use frost_secp256k1_tr_unofficial as frost;
 use frost_secp256k1_tr_unofficial::keys::EvenY;
@@ -29,17 +24,15 @@ use tauri::{AppHandle, Emitter, Manager};
 use igloo_shell_core::shell::{ProfileManifest, ShellPaths, daemon_log_path as profile_log_path, read_daemon_metadata, resolve_profile_runtime};
 
 use crate::events::{
-    EVENT_APP_CLOSE_REQUESTED, EVENT_SIGNER_LIFECYCLE, EVENT_SIGNER_LOG, EVENT_SIGNER_POLICIES,
-    EVENT_SIGNER_RESUME_REQUESTED, EVENT_SIGNER_STATUS,
+    EVENT_APP_CLOSE_REQUESTED, EVENT_SIGNER_LIFECYCLE, EVENT_SIGNER_LOG, EVENT_SIGNER_STATUS,
 };
 use crate::models::{
-    AcceptedOnboardingPackage, CloseRequestEvent, GeneratedKeyset, GeneratedKeysetShare,
-    PolicySnapshot, ProfileRuntimeSnapshot, RecoveredKey, SessionResume, SignerLifecycleEvent,
-    SignerLogEntry, SignerLogEvent, SignerPoliciesEvent, SignerSnapshot, SignerStatusEvent,
-    StartProfileSessionRequest, StartSignerRequest, UnlockShareInput,
+    CloseRequestEvent, GeneratedKeyset, GeneratedKeysetShare, ProfileRuntimeSnapshot,
+    SessionResume, SignerLifecycleEvent, SignerLogEntry, SignerLogEvent,
+    SignerStatusEvent, StartProfileSessionRequest,
 };
 use crate::paths::AppPaths;
-use crate::share_store::{append_session_log, read_session_log, unlock_share};
+use crate::session_log::{append_session_log, read_session_log};
 
 const LOG_LIMIT: usize = 200;
 
@@ -75,9 +68,6 @@ impl Default for SignerState {
 pub struct ActiveSigner {
     pub share_id: String,
     pub share_name: String,
-    pub relay_urls: Vec<String>,
-    pub peer_pubkeys: Vec<String>,
-    pub group_public_key: String,
     pub runtime_dir: std::path::PathBuf,
     pub state_path: std::path::PathBuf,
     pub store: EncryptedFileStore,
@@ -105,144 +95,6 @@ pub fn make_app_state(
         settings: Mutex::new(settings),
         close: Mutex::new(CloseState::default()),
     }
-}
-
-pub async fn start_signer(
-    app: &AppHandle,
-    state: &AppState,
-    input: StartSignerRequest,
-) -> Result<SignerSnapshot> {
-    {
-        let guard = state.signer.lock().unwrap();
-        if guard.active.is_some() {
-            bail!("a signer session is already active");
-        }
-    }
-
-    let unlocked = unlock_share(
-        &state.paths,
-        UnlockShareInput {
-            share_id: input.share_id.clone(),
-            password: input.password.clone(),
-        },
-    )
-    .map_err(unlock_error_to_anyhow)?;
-
-    let group = decode_group_package_json(&unlocked.group_package_json)?;
-    let share = decode_share_package_json(&unlocked.share_package_json)?;
-    let relay_urls = normalize_lines(input.relay_urls);
-    if relay_urls.is_empty() {
-        bail!("at least one relay URL is required");
-    }
-    let peer_pubkeys = normalize_lines(input.peer_pubkeys);
-
-    let runtime_dir = state.paths.runtime_share_dir(&unlocked.metadata.share_id)?;
-    fs::create_dir_all(&runtime_dir)?;
-    fs::write(
-        state.paths.session_group_path(&runtime_dir),
-        unlocked.group_package_json.as_bytes(),
-    )?;
-    fs::write(
-        state.paths.session_share_path(&runtime_dir),
-        unlocked.share_package_json.as_bytes(),
-    )?;
-    let state_path = state.paths.session_state_path(&runtime_dir);
-
-    let config = AppConfig {
-        group_path: state
-            .paths
-            .session_group_path(&runtime_dir)
-            .display()
-            .to_string(),
-        share_path: state
-            .paths
-            .session_share_path(&runtime_dir)
-            .display()
-            .to_string(),
-        state_path: state_path.display().to_string(),
-        relays: relay_urls.clone(),
-        peers: peer_pubkeys
-            .iter()
-            .map(|peer| PeerConfig {
-                pubkey: peer.clone(),
-                policy: PeerPolicy::default(),
-            })
-            .collect(),
-        options: Default::default(),
-    };
-    fs::write(
-        state.paths.session_config_path(&runtime_dir),
-        serde_json::to_vec_pretty(&config)?,
-    )?;
-
-    let store = EncryptedFileStore::new(state_path.clone(), share);
-    let signer = load_or_init_signer(&config, &store)?;
-    let run_id = begin_run(&state_path)?;
-    let bridge = Arc::new(
-        Bridge::start_with_config(
-            NostrSdkAdapter::new(relay_urls.clone()),
-            signer,
-            BridgeConfig::default(),
-        )
-        .await?,
-    );
-
-    let session_resume = SessionResume {
-        share_id: unlocked.metadata.share_id.clone(),
-        share_name: unlocked.metadata.name.clone(),
-        relay_urls: relay_urls.clone(),
-        peer_pubkeys: peer_pubkeys.clone(),
-        group_public_key: hex::encode(group.group_pk),
-        runtime_dir: runtime_dir.display().to_string(),
-        last_started_at: now_unix_secs(),
-        last_stopped_at: None,
-    };
-    write_json(
-        state.paths.session_metadata_path(&runtime_dir),
-        &session_resume,
-    )?;
-    write_json(state.paths.last_session_path.clone(), &session_resume)?;
-
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let monitor_handle = spawn_monitor(
-        app.clone(),
-        state.signer.clone(),
-        state.paths.clone(),
-        runtime_dir.clone(),
-        bridge.clone(),
-        stop_flag.clone(),
-    );
-
-    {
-        let mut guard = state.signer.lock().unwrap();
-        let entry = make_log(
-            "info",
-            format!("started signer session for '{}'", unlocked.metadata.name),
-        );
-        guard.logs.push_back(entry.clone());
-        trim_logs(&mut guard.logs);
-        append_session_log(&state.paths, &runtime_dir, &entry)?;
-        let _ = app.emit(EVENT_SIGNER_LOG, SignerLogEvent { entry });
-        guard.last_session = Some(session_resume.clone());
-        guard.active = Some(ActiveSigner {
-            share_id: unlocked.metadata.share_id.clone(),
-            share_name: unlocked.metadata.name.clone(),
-            relay_urls,
-            peer_pubkeys,
-            group_public_key: hex::encode(group.group_pk),
-            runtime_dir: runtime_dir.clone(),
-            state_path,
-            store,
-            bridge: bridge.clone(),
-            run_id,
-            stop_flag,
-            monitor_handle,
-            session_resume: session_resume.clone(),
-        });
-    }
-
-    emit_lifecycle(app, state, "started")?;
-    snapshot(app, state).await
 }
 
 pub async fn start_profile_session(
@@ -300,7 +152,7 @@ async fn start_profile_session_resolved(
         share_id: profile.id.clone(),
         share_name: profile.label.clone(),
         relay_urls: resolved.relays.clone(),
-        peer_pubkeys: resolved.peers.iter().map(|peer| peer.pubkey.clone()).collect(),
+        peer_pubkeys: resolved.peers.clone(),
         group_public_key: hex::encode(resolved.group.group_pk),
         runtime_dir: runtime_dir.display().to_string(),
         last_started_at: now_unix_secs(),
@@ -333,9 +185,6 @@ async fn start_profile_session_resolved(
         guard.active = Some(ActiveSigner {
             share_id: profile.id.clone(),
             share_name: profile.label.clone(),
-            relay_urls: resolved.relays.clone(),
-            peer_pubkeys: resolved.peers.iter().map(|peer| peer.pubkey.clone()).collect(),
-            group_public_key: hex::encode(resolved.group.group_pk),
             runtime_dir: runtime_dir.clone(),
             state_path,
             store,
@@ -393,78 +242,6 @@ pub async fn stop_signer(app: &AppHandle, state: &AppState, reason: &str) -> Res
     Ok(())
 }
 
-pub async fn snapshot(app: &AppHandle, state: &AppState) -> Result<SignerSnapshot> {
-    let (active_fields, logs, last_session) = {
-        let guard = state.signer.lock().unwrap();
-        (
-            guard.active.as_ref().map(|active| {
-                (
-                    active.share_id.clone(),
-                    active.share_name.clone(),
-                    active.group_public_key.clone(),
-                    active.relay_urls.clone(),
-                    active.peer_pubkeys.clone(),
-                    active.runtime_dir.display().to_string(),
-                    active.bridge.clone(),
-                )
-            }),
-            guard.logs.iter().cloned().collect::<Vec<_>>(),
-            guard.last_session.clone(),
-        )
-    };
-
-    let Some((
-        share_id,
-        share_name,
-        group_public_key,
-        relay_urls,
-        peer_pubkeys,
-        runtime_dir,
-        bridge,
-    )) = active_fields
-    else {
-        return Ok(SignerSnapshot {
-            active: false,
-            share_id: None,
-            share_name: None,
-            group_public_key: None,
-            relay_urls: Vec::new(),
-            peer_pubkeys: Vec::new(),
-            runtime_dir: None,
-            status: None,
-            policies: Vec::new(),
-            logs,
-            last_session,
-        });
-    };
-
-    let status = bridge.status().await?;
-    let mut policies = bridge
-        .policies()
-        .await?
-        .into_iter()
-        .map(|(peer, policy)| PolicySnapshot { peer, policy })
-        .collect::<Vec<_>>();
-    policies.sort_by(|a, b| a.peer.cmp(&b.peer));
-
-    let snapshot = SignerSnapshot {
-        active: true,
-        share_id: Some(share_id),
-        share_name: Some(share_name),
-        group_public_key: Some(group_public_key),
-        relay_urls,
-        peer_pubkeys,
-        runtime_dir: Some(runtime_dir),
-        status: Some(status.clone()),
-        policies: policies.clone(),
-        logs,
-        last_session,
-    };
-    let _ = app.emit(EVENT_SIGNER_STATUS, SignerStatusEvent { status });
-    let _ = app.emit(EVENT_SIGNER_POLICIES, SignerPoliciesEvent { policies });
-    Ok(snapshot)
-}
-
 pub async fn profile_session_snapshot(
     _app: &AppHandle,
     state: &AppState,
@@ -478,9 +255,7 @@ pub async fn profile_session_snapshot(
             profile: None,
             runtime_status: None,
             readiness: None,
-            readiness_explanation: None,
             runtime_diagnostics: None,
-            policies: None,
             daemon_log_path: None,
             daemon_log_lines: Vec::new(),
             daemon_metadata: None,
@@ -532,30 +307,13 @@ pub async fn profile_session_snapshot(
     } else {
         None
     };
-    let policies = if let Some(bridge) = &bridge {
-        Some(serde_json::to_value(bridge.policies().await?)?)
-    } else {
-        None
-    };
-    let readiness_explanation = if let Some(runtime_status) = &runtime_status {
-        let status: bifrost_signer::RuntimeStatusSummary =
-            serde_json::from_value(runtime_status.clone())?;
-        Some(serde_json::to_value(explain_readiness(
-            &status.readiness,
-            &status.peers,
-        ))?)
-    } else {
-        None
-    };
-    let runtime_diagnostics = match (&runtime_status, &policies, &readiness_explanation) {
-        (Some(runtime_status), Some(policies), Some(readiness_explanation)) => Some(
+    let runtime_diagnostics = match &runtime_status {
+        Some(runtime_status) => Some(
             serde_json::json!({
                 "runtime_status": runtime_status,
-                "policies": policies,
-                "readiness_explanation": readiness_explanation,
             }),
         ),
-        _ => None,
+        None => None,
     };
 
     Ok(ProfileRuntimeSnapshot {
@@ -563,9 +321,7 @@ pub async fn profile_session_snapshot(
         profile,
         runtime_status,
         readiness,
-        readiness_explanation,
         runtime_diagnostics,
-        policies,
         daemon_log_path,
         daemon_log_lines: log_lines,
         daemon_metadata,
@@ -664,21 +420,6 @@ pub fn maybe_handle_close_request(window: &tauri::Window, state: &AppState) -> R
     Ok(true)
 }
 
-pub fn request_resume(app: &AppHandle, state: &AppState) -> Result<()> {
-    let should_emit = {
-        let settings = state.settings.lock().unwrap().clone();
-        let signer = state.signer.lock().unwrap();
-        !signer.active.is_some() && settings.reopen_last_session
-    };
-    if !should_emit {
-        return Ok(());
-    }
-    if let Some(session) = state.signer.lock().unwrap().last_session.clone() {
-        let _ = app.emit(EVENT_SIGNER_RESUME_REQUESTED, session);
-    }
-    Ok(())
-}
-
 pub fn make_generated_keyset(threshold: u16, count: u16) -> Result<GeneratedKeyset> {
     let bundle = create_keyset(CreateKeysetConfig { threshold, count })?;
     generated_keyset_response("generated", bundle.group, bundle.shares)
@@ -687,47 +428,6 @@ pub fn make_generated_keyset(threshold: u16, count: u16) -> Result<GeneratedKeys
 pub fn make_imported_keyset(threshold: u16, count: u16, nsec: &str) -> Result<GeneratedKeyset> {
     let (group, shares) = split_existing_nsec(nsec, threshold, count)?;
     generated_keyset_response("imported_nsec", group, shares)
-}
-
-pub fn recover_nsec(
-    group_package_json: &str,
-    share_package_jsons: &[String],
-) -> Result<RecoveredKey> {
-    let group = decode_group_package_json(group_package_json)?;
-    let shares = share_package_jsons
-        .iter()
-        .map(|raw| decode_share_package_json(raw))
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let recovered = recover_key(&RecoverKeyInput { group, shares })?;
-    Ok(RecoveredKey {
-        nsec: encode_nsec(&recovered.signing_key32)?,
-        signing_key_hex: hex::encode(recovered.signing_key32),
-    })
-}
-
-pub fn accept_onboarding_package(
-    package: &str,
-    password: &str,
-) -> Result<AcceptedOnboardingPackage> {
-    let decoded = frostr_utils::decode_onboarding_package(package, Some(password))
-        .map_err(|error| anyhow!(error.to_string()))?;
-    let challenge = decoded
-        .challenge
-        .ok_or_else(|| anyhow!("onboarding package is missing challenge metadata"))?;
-    let created_at = decoded
-        .created_at
-        .ok_or_else(|| anyhow!("onboarding package is missing created_at"))?;
-    let expires_at = decoded
-        .expires_at
-        .ok_or_else(|| anyhow!("onboarding package is missing expires_at"))?;
-    Ok(AcceptedOnboardingPackage {
-        share_package_json: encode_share_package_json(&decoded.share)?,
-        peer_pubkey: hex::encode(decoded.peer_pk),
-        relay_urls: decoded.relays,
-        challenge_hex32: hex::encode(challenge),
-        created_at,
-        expires_at,
-    })
 }
 
 fn spawn_monitor(
@@ -740,7 +440,6 @@ fn spawn_monitor(
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
         let mut last_status = None::<String>;
-        let mut last_policies = None::<String>;
         while !stop_flag.load(Ordering::Relaxed) {
             if let Ok(status) = bridge.status().await {
                 if let Ok(encoded) = serde_json::to_string(&status) {
@@ -757,22 +456,6 @@ fn spawn_monitor(
                 }
                 let _ = append_session_log(&paths, &runtime_dir, &entry);
                 let _ = app.emit(EVENT_SIGNER_LOG, SignerLogEvent { entry });
-            }
-            if let Ok(policies) = bridge.policies().await {
-                let mut snapshot = policies
-                    .into_iter()
-                    .map(|(peer, policy)| PolicySnapshot { peer, policy })
-                    .collect::<Vec<_>>();
-                snapshot.sort_by(|a, b| a.peer.cmp(&b.peer));
-                if let Ok(encoded) = serde_json::to_string(&snapshot) {
-                    if last_policies.as_ref() != Some(&encoded) {
-                        last_policies = Some(encoded);
-                        let _ = app.emit(
-                            EVENT_SIGNER_POLICIES,
-                            SignerPoliciesEvent { policies: snapshot },
-                        );
-                    }
-                }
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
@@ -888,6 +571,20 @@ fn split_existing_nsec(
     ))
 }
 
+#[cfg(test)]
+fn normalize_lines(values: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        for line in value.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() && !out.iter().any(|existing| existing == trimmed) {
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+    out
+}
+
 fn encode_nsec(secret: &[u8; 32]) -> Result<String> {
     let hrp = Hrp::parse("nsec")?;
     Ok(bech32::encode::<Bech32>(hrp, secret)?)
@@ -904,19 +601,6 @@ fn decode_nsec(value: &str) -> Result<[u8; 32]> {
     let mut out = [0u8; 32];
     out.copy_from_slice(&bytes);
     Ok(out)
-}
-
-fn normalize_lines(values: Vec<String>) -> Vec<String> {
-    let mut out = Vec::new();
-    for value in values {
-        for line in value.lines() {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() && !out.iter().any(|existing| existing == trimmed) {
-                out.push(trimmed.to_string());
-            }
-        }
-    }
-    out
 }
 
 fn now_unix_secs() -> u64 {
@@ -942,16 +626,24 @@ fn write_json<T: Serialize>(path: std::path::PathBuf, value: &T) -> Result<()> {
     Ok(())
 }
 
-fn unlock_error_to_anyhow(error: crate::share_store::UnlockFailure) -> anyhow::Error {
-    match error {
-        crate::share_store::UnlockFailure::WrongPassword => anyhow!("wrong password"),
-        crate::share_store::UnlockFailure::CorruptFile(message) => anyhow!(message),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_lines_dedupes_and_trims() {
+        assert_eq!(
+            normalize_lines(vec![
+                " wss://relay.one \n\nwss://relay.two".into(),
+                "wss://relay.one\nwss://relay.three ".into(),
+            ]),
+            vec![
+                "wss://relay.one".to_string(),
+                "wss://relay.two".to_string(),
+                "wss://relay.three".to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn nsec_roundtrip() {

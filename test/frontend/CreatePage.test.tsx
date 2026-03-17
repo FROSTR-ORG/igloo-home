@@ -35,6 +35,7 @@ describe('CreatePage', () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole('button', { name: /^onboard$/i }));
     fireEvent.click(screen.getByRole('button', { name: /import onboarding package/i }));
     expect(onImportOnboardingProfile).toHaveBeenCalledTimes(1);
   });

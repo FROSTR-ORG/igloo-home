@@ -1,12 +1,15 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use bifrost_app::runtime::AppOptions;
 use igloo_shell_core::shell::{
-    ProfileExportResult, ProfileImportResult, ProfileManifest, RelayProfile, ShellPaths,
-    export_profile, import_profile_from_files, import_profile_from_onboarding_value, list_profiles,
-    load_relay_profiles, load_shell_config, remove_profile, replace_relay_profile,
-    set_default_relay_profile,
+    ProfileBackupPublishResult, ProfileExportResult, ProfileImportResult, ProfileManifest,
+    ProfilePackageExportResult, RelayProfile, ShellPaths, export_profile, export_profile_as_bfprofile,
+    export_profile_as_bfshare, import_profile_from_bfprofile_value, import_profile_from_files,
+    import_profile_from_onboarding_value, list_profiles, load_relay_profiles, load_shell_config,
+    publish_profile_backup, read_profile, recover_profile_from_bfshare_value, remove_profile,
+    replace_relay_profile, set_default_relay_profile, write_profile,
 };
 
 pub fn list_managed_profiles(paths: &ShellPaths) -> Result<Vec<ProfileManifest>> {
@@ -78,6 +81,45 @@ pub async fn import_profile_from_onboarding(
     .await
 }
 
+pub fn import_profile_from_bfprofile(
+    paths: &ShellPaths,
+    label: Option<String>,
+    relay_profile: Option<String>,
+    vault_passphrase: Option<String>,
+    package_password: String,
+    package_raw: &str,
+) -> Result<ProfileImportResult> {
+    paths.ensure()?;
+    import_profile_from_bfprofile_value(
+        paths,
+        package_raw.trim(),
+        package_password.trim().to_string(),
+        label,
+        relay_profile,
+        vault_passphrase,
+    )
+}
+
+pub async fn recover_profile_from_bfshare(
+    paths: &ShellPaths,
+    label: Option<String>,
+    relay_profile: Option<String>,
+    vault_passphrase: Option<String>,
+    package_password: String,
+    package_raw: &str,
+) -> Result<ProfileImportResult> {
+    paths.ensure()?;
+    recover_profile_from_bfshare_value(
+        paths,
+        package_raw.trim(),
+        package_password.trim().to_string(),
+        label,
+        relay_profile,
+        vault_passphrase,
+    )
+    .await
+}
+
 pub fn export_managed_profile(
     paths: &ShellPaths,
     profile_id: &str,
@@ -88,15 +130,64 @@ pub fn export_managed_profile(
     export_profile(paths, profile_id, out_dir, vault_passphrase)
 }
 
+pub fn export_managed_profile_package(
+    paths: &ShellPaths,
+    profile_id: &str,
+    format: &str,
+    package_password: String,
+    vault_passphrase: Option<String>,
+) -> Result<ProfilePackageExportResult> {
+    paths.ensure()?;
+    match format {
+        "bfprofile" => export_profile_as_bfprofile(
+            paths,
+            profile_id,
+            package_password,
+            vault_passphrase,
+            None,
+        ),
+        "bfshare" => export_profile_as_bfshare(paths, profile_id, package_password, vault_passphrase, None),
+        _ => bail!("unsupported export format {format}; expected bfprofile or bfshare"),
+    }
+}
+
+pub async fn publish_managed_profile_backup(
+    paths: &ShellPaths,
+    profile_id: &str,
+    vault_passphrase: Option<String>,
+) -> Result<ProfileBackupPublishResult> {
+    paths.ensure()?;
+    publish_profile_backup(paths, profile_id, vault_passphrase).await
+}
+
 pub fn remove_managed_profile(paths: &ShellPaths, profile_id: &str) -> Result<()> {
     paths.ensure()?;
     remove_profile(paths, profile_id)
 }
 
+pub fn update_managed_profile_settings(
+    paths: &ShellPaths,
+    profile_id: &str,
+    label: String,
+    relays: Vec<String>,
+    runtime_options: AppOptions,
+) -> Result<ProfileManifest> {
+    paths.ensure()?;
+    let mut profile = read_profile(paths, profile_id)?;
+    let mut relay_profile = igloo_shell_core::shell::read_relay_profile(paths, &profile.relay_profile)?;
+    relay_profile.label = label.clone();
+    relay_profile.relays = relays;
+    replace_relay_profile(paths, relay_profile)?;
+    profile.label = label;
+    profile.runtime_options = serde_json::to_value(runtime_options).context("serialize runtime options")?;
+    write_profile(paths, &profile)?;
+    Ok(profile)
+}
+
 pub fn shell_paths_response(paths: &ShellPaths) -> crate::models::AppPathsResponse {
     crate::models::AppPathsResponse {
         app_data_dir: paths.data_dir.display().to_string(),
-        shares_dir: paths.profiles_dir.display().to_string(),
+        profiles_dir: paths.profiles_dir.display().to_string(),
         runtime_dir: paths.state_profiles_dir.display().to_string(),
     }
 }

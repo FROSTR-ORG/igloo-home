@@ -3,40 +3,36 @@ import { describe, expect, it, vi } from 'vitest';
 import CreatePage from '@/pages/CreatePage';
 
 describe('CreatePage', () => {
-  it('dispatches onboarding import from the dedicated package section', () => {
-    const onImportOnboardingProfile = vi.fn();
+  it('switches into rotate mode and captures threshold bfshare inputs', () => {
+    const onChangeCreateForm = vi.fn();
+    const onAddRotationSource = vi.fn();
     render(
       <CreatePage
-        createForm={{ threshold: '2', count: '3', nsec: '' }}
-        importForm={{
-          label: '',
-          vaultPassphrase: '',
-          relayUrls: '',
-          groupPackageJson: '',
-          sharePackageJson: '',
-        }}
-        onboardingForm={{
-          packageText: 'bfonboard1deadbeef',
-          password: 'playwright-password',
-          vaultPassphrase: 'vault-pass',
-          label: 'Bob',
-        }}
+        createForm={{ mode: 'rotate', threshold: '2', count: '3', sourceProfileId: '' }}
+        availableProfiles={[{ id: 'alice', label: 'Alice Laptop' }]}
+        rotationSources={[{ packageText: '', packagePassword: '' }]}
         generatedKeyset={null}
         saveForms={{}}
-        onChangeCreateForm={vi.fn()}
+        selectedMemberIdx={null}
+        distributionForms={{}}
+        distributionResults={{}}
+        onChangeCreateForm={onChangeCreateForm}
+        onChangeRotationSource={vi.fn()}
+        onAddRotationSource={onAddRotationSource}
+        onRemoveRotationSource={vi.fn()}
         onGenerateFresh={vi.fn()}
-        onGenerateImported={vi.fn()}
-        onChangeImportForm={vi.fn()}
-        onChangeOnboardingForm={vi.fn()}
-        onImportOnboardingProfile={onImportOnboardingProfile}
-        onImportRawProfile={vi.fn()}
         onChangeSaveForm={vi.fn()}
         onSaveGeneratedProfile={vi.fn()}
+        onChangeDistributionForm={vi.fn()}
+        onDistributeShare={vi.fn()}
+        onFinishDistribution={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /^onboard$/i }));
-    fireEvent.click(screen.getByRole('button', { name: /import onboarding package/i }));
-    expect(onImportOnboardingProfile).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Create New Keyset' }));
+    expect(onChangeCreateForm).toHaveBeenCalledWith('mode', 'new');
+    expect(screen.getByRole('button', { name: 'Add bfshare Source' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add bfshare Source' }));
+    expect(onAddRotationSource).toHaveBeenCalledTimes(1);
   });
 });

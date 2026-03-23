@@ -10,16 +10,23 @@ pub struct CreateKeysetRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateImportedKeysetRequest {
+pub struct RotationSourceInput {
+    pub package: String,
+    pub package_password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RotateKeysetRequest {
     pub threshold: u16,
     pub count: u16,
-    pub nsec: String,
+    pub sources: Vec<RotationSourceInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneratedKeysetShare {
     pub name: String,
     pub member_idx: u16,
+    pub share_public_key: String,
     pub share_package_json: String,
 }
 
@@ -32,6 +39,14 @@ pub struct GeneratedKeyset {
     pub group_public_key: String,
     pub nsec: String,
     pub shares: Vec<GeneratedKeysetShare>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateGeneratedOnboardingPackageInput {
+    pub share_package_json: String,
+    pub relay_urls: Vec<String>,
+    pub peer_pubkey: String,
+    pub package_password: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +84,14 @@ pub struct RecoverProfileFromBfshareInput {
     pub vault_passphrase: String,
     pub package_password: String,
     pub package: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplyRotationUpdateInput {
+    pub target_profile_id: String,
+    pub vault_passphrase: String,
+    pub onboarding_password: String,
+    pub onboarding_package: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

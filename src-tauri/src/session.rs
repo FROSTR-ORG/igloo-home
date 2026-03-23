@@ -13,23 +13,29 @@ use bifrost_app::runtime::{
     EncryptedFileStore, ResolvedAppConfig, begin_run, complete_clean_run, load_or_init_signer_resolved,
 };
 use bifrost_bridge_tokio::{Bridge, BridgeConfig, NostrSdkAdapter};
-use bifrost_codec::{encode_group_package_json, encode_share_package_json};
+use bifrost_codec::{encode_group_package_json, encode_share_package_json, parse_share_package};
+use bifrost_core::get_group_id;
 use bifrost_core::types::{GroupPackage, SharePackage};
 use bifrost_signer::DeviceStore;
-use frost_secp256k1_tr_unofficial as frost;
-use frost_secp256k1_tr_unofficial::keys::EvenY;
-use frostr_utils::{CreateKeysetConfig, RecoverKeyInput, create_keyset, recover_key};
+use frostr_utils::{
+    BfOnboardPayload, CreateKeysetConfig, RecoverKeyInput, RotateKeysetRequest,
+    create_keyset, encode_bfonboard_package, recover_key, rotate_keyset_dealer,
+};
+use k256::elliptic_curve::sec1::ToEncodedPoint;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use igloo_shell_core::shell::{ProfileManifest, ShellPaths, daemon_log_path as profile_log_path, read_daemon_metadata, resolve_profile_runtime};
+use igloo_shell_core::shell::{
+    ProfileManifest, ShellPaths, daemon_log_path as profile_log_path, preview_bfshare_recovery,
+    read_daemon_metadata, resolve_profile_runtime,
+};
 
 use crate::events::{
     EVENT_APP_CLOSE_REQUESTED, EVENT_SIGNER_LIFECYCLE, EVENT_SIGNER_LOG, EVENT_SIGNER_STATUS,
 };
 use crate::models::{
-    CloseRequestEvent, GeneratedKeyset, GeneratedKeysetShare, ProfileRuntimeSnapshot,
-    SessionResume, SignerLifecycleEvent, SignerLogEntry, SignerLogEvent,
-    SignerStatusEvent, StartProfileSessionRequest,
+    CloseRequestEvent, GeneratedKeyset, GeneratedKeysetShare, ProfileRuntimeSnapshot, RotationSourceInput,
+    SessionResume, SignerLifecycleEvent, SignerLogEntry, SignerLogEvent, SignerStatusEvent,
+    StartProfileSessionRequest,
 };
 use crate::paths::AppPaths;
 use crate::session_log::{append_session_log, read_session_log};
@@ -425,9 +431,51 @@ pub fn make_generated_keyset(threshold: u16, count: u16) -> Result<GeneratedKeys
     generated_keyset_response("generated", bundle.group, bundle.shares)
 }
 
-pub fn make_imported_keyset(threshold: u16, count: u16, nsec: &str) -> Result<GeneratedKeyset> {
-    let (group, shares) = split_existing_nsec(nsec, threshold, count)?;
-    generated_keyset_response("imported_nsec", group, shares)
+pub async fn make_rotated_keyset(
+    threshold: u16,
+    count: u16,
+    sources: Vec<RotationSourceInput>,
+) -> Result<GeneratedKeyset> {
+    if sources.is_empty() {
+        bail!("at least one bfshare source is required");
+    }
+
+    let mut recovered = Vec::new();
+    for source in sources {
+        let (_, payload) = preview_bfshare_recovery(&source.package, source.package_password, None).await?;
+        recovered.push(payload);
+    }
+
+    let current_group = group_from_payload(&recovered[0])?;
+    let current_group_id = hex::encode(get_group_id(&current_group)?);
+    let current_group_pk = hex::encode(current_group.group_pk);
+
+    for payload in recovered.iter().skip(1) {
+        let candidate = group_from_payload(payload)?;
+        if hex::encode(candidate.group_pk) != current_group_pk {
+            bail!("rotation sources do not share the same group public key");
+        }
+        if hex::encode(get_group_id(&candidate)?) != current_group_id {
+            bail!("rotation sources do not belong to the same current group configuration");
+        }
+    }
+
+    let shares = recovered
+        .iter()
+        .map(|payload| share_from_payload(&current_group, payload))
+        .collect::<Result<Vec<_>>>()?;
+
+    let rotated = rotate_keyset_dealer(
+        &current_group,
+        RotateKeysetRequest {
+            shares,
+            threshold,
+            count,
+        },
+    )
+        .map_err(|error| anyhow!("rotate keyset: {error}"))?;
+
+    generated_keyset_response("rotated", rotated.next.group, rotated.next.shares)
 }
 
 fn spawn_monitor(
@@ -479,6 +527,14 @@ fn generated_keyset_response(
         share_entries.push(GeneratedKeysetShare {
             name: format!("Member {}", share.idx),
             member_idx: share.idx,
+            share_public_key: hex::encode(
+                k256::SecretKey::from_slice(&share.seckey)
+                    .map_err(|error| anyhow!("invalid share seckey: {error}"))?
+                    .public_key()
+                    .to_encoded_point(true)
+                    .as_bytes()[1..]
+                    .to_vec(),
+            ),
             share_package_json: encode_share_package_json(share)?,
         });
     }
@@ -501,74 +557,77 @@ fn generated_keyset_response(
     })
 }
 
-fn split_existing_nsec(
-    nsec: &str,
-    threshold: u16,
-    count: u16,
-) -> Result<(GroupPackage, Vec<SharePackage>)> {
-    if threshold < 2 {
-        bail!("threshold must be at least 2");
+pub fn make_generated_onboarding_package(
+    share_package_json: &str,
+    relay_urls: Vec<String>,
+    peer_pubkey: String,
+    package_password: String,
+) -> Result<String> {
+    if relay_urls.is_empty() {
+        bail!("at least one relay is required");
     }
-    if count < threshold {
-        bail!("count must be greater than or equal to threshold");
-    }
-    let secret_bytes = decode_nsec(nsec)?;
-    let signing_key = frost::SigningKey::deserialize(&secret_bytes)
-        .map_err(|e| anyhow!("invalid nsec secret: {e}"))?;
-    let (shares, public_key_package) = frost::keys::split(
-        &signing_key,
-        count,
-        threshold,
-        frost::keys::IdentifierList::Default,
-        &mut rand_core::OsRng,
-    )
-    .map_err(|e| anyhow!("split existing key failed: {e}"))?;
-    let public_key_package = public_key_package.into_even_y(None);
-
-    let mut group_pk = [0u8; 32];
-    group_pk.copy_from_slice(
-        &public_key_package
-            .verifying_key()
-            .serialize()
-            .map_err(|e| anyhow!("serialize group public key: {e}"))?[1..],
-    );
-
-    let mut members = Vec::new();
-    let mut share_packages = Vec::new();
-    for (identifier, secret_share) in shares {
-        let key_package = frost::keys::KeyPackage::try_from(secret_share)
-            .map_err(|e| anyhow!("derive key package: {e}"))?
-            .into_even_y(None);
-        let id_ser = identifier.serialize();
-        let idx = id_ser[31] as u16;
-
-        let mut member_pk = [0u8; 33];
-        member_pk.copy_from_slice(
-            &key_package
-                .verifying_share()
-                .serialize()
-                .map_err(|e| anyhow!("serialize verifying share: {e}"))?,
-        );
-
-        let mut seckey = [0u8; 32];
-        seckey.copy_from_slice(&key_package.signing_share().serialize());
-
-        members.push(bifrost_core::types::MemberPackage {
-            idx,
-            pubkey: member_pk,
-        });
-        share_packages.push(SharePackage { idx, seckey });
-    }
-    members.sort_by_key(|member| member.idx);
-    share_packages.sort_by_key(|share| share.idx);
-    Ok((
-        GroupPackage {
-            group_pk,
-            threshold,
-            members,
+    let share = parse_share_package(share_package_json).map_err(|error| anyhow!("parse share package: {error}"))?;
+    encode_bfonboard_package(
+        &BfOnboardPayload {
+            share_secret: hex::encode(share.seckey),
+            relays: relay_urls,
+            peer_pk: peer_pubkey,
         },
-        share_packages,
-    ))
+        &package_password,
+    )
+    .map_err(|error| anyhow!("encode bfonboard package: {error}"))
+}
+
+fn group_from_payload(payload: &frostr_utils::BfProfilePayload) -> Result<GroupPackage> {
+    let members = payload
+        .group
+        .members
+        .iter()
+        .map(|member| {
+            let mut pubkey = [0u8; 33];
+            pubkey[0] = 0x02;
+            pubkey[1..].copy_from_slice(&hex::decode(&member.share_public_key)?);
+            Ok(bifrost_core::types::MemberPackage {
+                idx: member.index,
+                pubkey,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(GroupPackage {
+        group_pk: hex::decode(&payload.group.group_public_key)?
+            .try_into()
+            .map_err(|_| anyhow!("invalid group public key"))?,
+        threshold: payload.group.threshold,
+        members,
+    })
+}
+
+fn share_from_payload(group: &GroupPackage, payload: &frostr_utils::BfProfilePayload) -> Result<SharePackage> {
+    let share_secret = hex::decode(&payload.device.share_secret)?;
+    let seckey: [u8; 32] = share_secret
+        .try_into()
+        .map_err(|_| anyhow!("invalid share secret"))?;
+    let share_public_key = hex::encode(
+        k256::SecretKey::from_slice(&seckey)
+            .map_err(|error| anyhow!("invalid share secret: {error}"))?
+            .public_key()
+            .to_sec1_bytes(),
+    );
+    let xonly = share_public_key
+        .strip_prefix("02")
+        .or_else(|| share_public_key.strip_prefix("03"))
+        .unwrap_or(&share_public_key)
+        .to_string();
+    let member = group
+        .members
+        .iter()
+        .find(|member| hex::encode(&member.pubkey[1..]) == xonly)
+        .ok_or_else(|| anyhow!("share secret does not match any member in the recovered group"))?;
+    Ok(SharePackage {
+        idx: member.idx,
+        seckey,
+    })
 }
 
 #[cfg(test)]
@@ -588,19 +647,6 @@ fn normalize_lines(values: Vec<String>) -> Vec<String> {
 fn encode_nsec(secret: &[u8; 32]) -> Result<String> {
     let hrp = Hrp::parse("nsec")?;
     Ok(bech32::encode::<Bech32>(hrp, secret)?)
-}
-
-fn decode_nsec(value: &str) -> Result<[u8; 32]> {
-    let (hrp, bytes) = bech32::decode(value)?;
-    if hrp.to_string() != "nsec" {
-        bail!("expected nsec prefix, got {hrp}");
-    }
-    if bytes.len() != 32 {
-        bail!("nsec must decode to 32 bytes");
-    }
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&bytes);
-    Ok(out)
 }
 
 fn now_unix_secs() -> u64 {
@@ -645,10 +691,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn nsec_roundtrip() {
-        let bytes = [7u8; 32];
-        let encoded = encode_nsec(&bytes).expect("encode");
-        assert_eq!(decode_nsec(&encoded).expect("decode"), bytes);
-    }
 }

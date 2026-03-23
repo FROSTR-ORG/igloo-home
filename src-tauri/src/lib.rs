@@ -11,11 +11,12 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 use models::{
-    AppPathsResponse, AppSettings, AppSettingsEvent, ExportProfileInput, ExportProfilePackageInput,
-    ImportProfileFromBfprofileInput, ImportProfileFromOnboardingInput, ImportProfileFromRawInput,
-    ListSessionLogsInput, ProfileRuntimeSnapshot, PublishProfileBackupInput,
-    RecoverProfileFromBfshareInput, RemoveProfileInput, ResolveCloseRequestInput,
-    SettingsUpdateInput, StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
+    AppPathsResponse, AppSettings, AppSettingsEvent, ApplyRotationUpdateInput, CreateGeneratedOnboardingPackageInput,
+    ExportProfileInput, ExportProfilePackageInput, ImportProfileFromBfprofileInput,
+    ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
+    ProfileRuntimeSnapshot, PublishProfileBackupInput, RecoverProfileFromBfshareInput, RotateKeysetRequest,
+    RemoveProfileInput, ResolveCloseRequestInput, SettingsUpdateInput,
+    StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
 };
 use paths::AppPaths;
 use session::{
@@ -209,10 +210,25 @@ async fn create_generated_keyset_command(
 }
 
 #[tauri::command]
-async fn create_imported_keyset_command(
-    input: models::CreateImportedKeysetRequest,
+async fn create_rotated_keyset_command(
+    input: RotateKeysetRequest,
 ) -> std::result::Result<models::GeneratedKeyset, String> {
-    session::make_imported_keyset(input.threshold, input.count, &input.nsec).map_err(error_message)
+    session::make_rotated_keyset(input.threshold, input.count, input.sources)
+        .await
+        .map_err(error_message)
+}
+
+#[tauri::command]
+async fn create_generated_onboarding_package_command(
+    input: CreateGeneratedOnboardingPackageInput,
+) -> std::result::Result<String, String> {
+    session::make_generated_onboarding_package(
+        &input.share_package_json,
+        input.relay_urls,
+        input.peer_pubkey,
+        input.package_password,
+    )
+    .map_err(error_message)
 }
 
 #[tauri::command]
@@ -237,6 +253,22 @@ async fn profile_runtime_snapshot_command(
     session::profile_session_snapshot(&app, state.inner(), profile_id)
         .await
         .map_err(error_message)
+}
+
+#[tauri::command]
+async fn apply_rotation_update_command(
+    state: tauri::State<'_, AppState>,
+    input: ApplyRotationUpdateInput,
+) -> std::result::Result<igloo_shell_core::shell::ProfileImportResult, String> {
+    igloo_shell_core::shell::apply_rotation_update_from_bfonboard_value(
+        &state.shell_paths,
+        &input.target_profile_id,
+        &input.onboarding_package,
+        input.onboarding_password,
+        Some(input.vault_passphrase),
+    )
+    .await
+    .map_err(error_message)
 }
 
 #[tauri::command]
@@ -481,13 +513,15 @@ pub fn run() {
             import_profile_from_onboarding_command,
             import_profile_from_bfprofile_command,
             recover_profile_from_bfshare_command,
+            apply_rotation_update_command,
             remove_profile_command,
             export_profile_command,
             export_profile_package_command,
             publish_profile_backup_command,
             update_profile_operator_settings_command,
             create_generated_keyset_command,
-            create_imported_keyset_command,
+            create_rotated_keyset_command,
+            create_generated_onboarding_package_command,
             start_profile_session_command,
             profile_runtime_snapshot_command,
             stop_signer_command,

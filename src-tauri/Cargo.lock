@@ -2368,6 +2368,7 @@ dependencies = [
  "frostr-utils",
  "hex",
  "igloo-shell-core",
+ "k256",
  "rand_core 0.6.4",
  "serde",
  "serde_json",

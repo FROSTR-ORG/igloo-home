@@ -8,8 +8,10 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::models::{
-    ExportProfileInput, ImportProfileFromOnboardingInput, ImportProfileFromRawInput,
-    ListSessionLogsInput, RemoveProfileInput, StartProfileSessionRequest,
+    ApplyRotationUpdateInput, CreateGeneratedOnboardingPackageInput, CreateKeysetRequest,
+    ExportProfileInput, ExportProfilePackageInput, ImportProfileFromOnboardingInput,
+    ImportProfileFromRawInput, ListSessionLogsInput, PublishProfileBackupInput, RemoveProfileInput,
+    RotateKeysetRequest, StartProfileSessionRequest,
 };
 use crate::{profiles, session, session_log};
 
@@ -114,6 +116,30 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
             ))?;
             Ok(serde_json::to_value(result)?)
         })(),
+        "create_generated_keyset" => (|| -> anyhow::Result<Value> {
+            let input: CreateKeysetRequest = serde_json::from_value(request.input)?;
+            let result = session::make_generated_keyset(input.threshold, input.count)?;
+            Ok(serde_json::to_value(result)?)
+        })(),
+        "create_rotated_keyset" => (|| -> anyhow::Result<Value> {
+            let input: RotateKeysetRequest = serde_json::from_value(request.input)?;
+            let result = tauri::async_runtime::block_on(session::make_rotated_keyset(
+                input.threshold,
+                input.count,
+                input.sources,
+            ))?;
+            Ok(serde_json::to_value(result)?)
+        })(),
+        "create_generated_onboarding_package" => (|| -> anyhow::Result<Value> {
+            let input: CreateGeneratedOnboardingPackageInput = serde_json::from_value(request.input)?;
+            let result = session::make_generated_onboarding_package(
+                &input.share_package_json,
+                input.relay_urls,
+                input.peer_pubkey,
+                input.package_password,
+            )?;
+            Ok(serde_json::to_value(result)?)
+        })(),
         "remove_profile" => (|| -> anyhow::Result<Value> {
             let state = app.state::<session::AppState>();
             let input: RemoveProfileInput = serde_json::from_value(request.input)?;
@@ -130,6 +156,28 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
                 Some(input.vault_passphrase),
             )
                 .and_then(|value| serde_json::to_value(value).map_err(Into::into))
+        })(),
+        "export_profile_package" => (|| -> anyhow::Result<Value> {
+            let state = app.state::<session::AppState>();
+            let input: ExportProfilePackageInput = serde_json::from_value(request.input)?;
+            profiles::export_managed_profile_package(
+                &state.shell_paths,
+                &input.profile_id,
+                &input.format,
+                input.package_password,
+                Some(input.vault_passphrase),
+            )
+            .and_then(|value| serde_json::to_value(value).map_err(Into::into))
+        })(),
+        "publish_profile_backup" => (|| -> anyhow::Result<Value> {
+            let state = app.state::<session::AppState>();
+            let input: PublishProfileBackupInput = serde_json::from_value(request.input)?;
+            tauri::async_runtime::block_on(profiles::publish_managed_profile_backup(
+                &state.shell_paths,
+                &input.profile_id,
+                Some(input.vault_passphrase),
+            ))
+            .and_then(|value| serde_json::to_value(value).map_err(Into::into))
         })(),
         "start_profile_session" => (|| -> anyhow::Result<Value> {
             let state = app.state::<session::AppState>();
@@ -160,6 +208,20 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
             tauri::async_runtime::block_on(session::stop_signer(app, state.inner(), "test_stop"))
                 .and_then(|_| Ok(serde_json::json!({ "stopped": true })))
         }
+        "apply_rotation_update" => (|| -> anyhow::Result<Value> {
+            let state = app.state::<session::AppState>();
+            let input: ApplyRotationUpdateInput = serde_json::from_value(request.input)?;
+            tauri::async_runtime::block_on(
+                igloo_shell_core::shell::apply_rotation_update_from_bfonboard_value(
+                    &state.shell_paths,
+                    &input.target_profile_id,
+                    &input.onboarding_package,
+                    input.onboarding_password,
+                    Some(input.vault_passphrase),
+                ),
+            )
+            .and_then(|value| serde_json::to_value(value).map_err(Into::into))
+        })(),
         "list_session_logs" => (|| -> anyhow::Result<Value> {
             let state = app.state::<session::AppState>();
             let input: ListSessionLogsInput = serde_json::from_value(request.input)?;

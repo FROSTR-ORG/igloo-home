@@ -30,10 +30,15 @@ type VisualScenarioState = {
   generatedKeyset: GeneratedKeyset | null;
   runtimeSnapshot: ProfileRuntimeSnapshot | null;
   createForm: {
+    mode?: 'new' | 'rotate';
     threshold: string;
     count: string;
-    nsec: string;
+    sourceProfileId?: string;
   };
+  rotationSources?: Array<{
+    packageText: string;
+    packagePassword: string;
+  }>;
   importForm: {
     label: string;
     vaultPassphrase: string;
@@ -46,6 +51,10 @@ type VisualScenarioState = {
     password: string;
     vaultPassphrase: string;
     label: string;
+  };
+  rotationForm?: {
+    onboardingPackage: string;
+    onboardingPassword: string;
   };
   loadMode: 'bfprofile' | 'bfshare';
   loadForm: {
@@ -100,16 +109,19 @@ const sampleGeneratedKeyset: GeneratedKeyset = {
     {
       name: 'Alice',
       member_idx: 1,
+      share_public_key: '11'.repeat(32),
       share_package_json: '{\n  "idx": 1,\n  "share": "alice"\n}',
     },
     {
       name: 'Bob',
       member_idx: 2,
+      share_public_key: '22'.repeat(32),
       share_package_json: '{\n  "idx": 2,\n  "share": "bob"\n}',
     },
     {
       name: 'Carol',
       member_idx: 3,
+      share_public_key: '33'.repeat(32),
       share_package_json: '{\n  "idx": 3,\n  "share": "carol"\n}',
     },
   ],
@@ -167,9 +179,10 @@ const baseState: VisualScenarioState = {
   generatedKeyset: null,
   runtimeSnapshot: null,
   createForm: {
+    mode: 'new',
     threshold: '2',
     count: '3',
-    nsec: 'nsec1v2visualpreviewexample',
+    sourceProfileId: '',
   },
   importForm: {
     label: 'Imported Device',

@@ -1,6 +1,7 @@
 export type GeneratedKeysetShare = {
   name: string;
   member_idx: number;
+  share_public_key: string;
   share_package_json: string;
 };
 

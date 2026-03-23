@@ -14,14 +14,17 @@ import {
   OperatorSettingsPanel,
   OperatorSignerPanel,
   PageLayout,
+  QrPayloadModal,
   Textarea,
   type LogEntry,
   type OperatorSignerSettings,
   type PeerPolicy,
 } from 'igloo-ui';
 import {
+  applyRotationUpdate,
+  createGeneratedOnboardingPackage,
   createGeneratedKeyset,
-  createImportedKeyset,
+  createRotatedKeyset,
   exportProfile,
   exportProfilePackage,
   getSettings,
@@ -77,6 +80,28 @@ type SaveDraft = {
   relayUrls: string;
 };
 
+type RotationSourceDraft = {
+  packageText: string;
+  packagePassword: string;
+};
+
+type DistributionDraft = {
+  label: string;
+  packagePassword: string;
+  confirmPassword: string;
+};
+
+type DistributionResult = {
+  kind: 'copied' | 'qr' | 'saved';
+  label: string;
+  packageText: string;
+};
+
+type RotationDraft = {
+  onboardingPackage: string;
+  onboardingPassword: string;
+};
+
 type PackageExportDraft = {
   packagePassword: string;
 };
@@ -107,6 +132,18 @@ function splitTextarea(value: string) {
     .split(/\n+/)
     .map(line => line.trim())
     .filter(Boolean);
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function unwrapImportedProfile(result: ProfileImportResult) {
@@ -428,8 +465,21 @@ export default function App() {
   const [vaultPassphrase, setVaultPassphrase] = useState(visualScenario?.vaultPassphrase ?? '');
   const [generatedKeyset, setGeneratedKeyset] = useState<GeneratedKeyset | null>(visualScenario?.generatedKeyset ?? null);
   const [createForm, setCreateForm] = useState(
-    visualScenario?.createForm ?? { threshold: '2', count: '3', nsec: '' },
+    {
+      mode: 'new',
+      threshold: '2',
+      count: '3',
+      sourceProfileId: '',
+      ...visualScenario?.createForm,
+    } as { mode: 'new' | 'rotate'; threshold: string; count: string; sourceProfileId: string },
   );
+  const [rotationSources, setRotationSources] = useState<RotationSourceDraft[]>(
+    visualScenario?.rotationSources ?? [{ packageText: '', packagePassword: '' }],
+  );
+  const [selectedGeneratedShareIdx, setSelectedGeneratedShareIdx] = useState<number | null>(null);
+  const [distributionForms, setDistributionForms] = useState<Record<number, DistributionDraft>>({});
+  const [distributionResults, setDistributionResults] = useState<Record<number, DistributionResult>>({});
+  const [distributionQr, setDistributionQr] = useState<{ label: string; packageText: string } | null>(null);
   const [saveForms, setSaveForms] = useState<Record<number, SaveDraft>>(visualScenario?.saveForms ?? {});
   const [importForm, setImportForm] = useState(
     visualScenario?.importForm ?? {
@@ -446,6 +496,12 @@ export default function App() {
       password: '',
       vaultPassphrase: '',
       label: '',
+    },
+  );
+  const [rotationForm, setRotationForm] = useState<RotationDraft>(
+    visualScenario?.rotationForm ?? {
+      onboardingPackage: '',
+      onboardingPassword: '',
     },
   );
   const [loadMode, setLoadMode] = useState<'bfprofile' | 'bfshare'>(visualScenario?.loadMode ?? 'bfprofile');
@@ -629,27 +685,57 @@ export default function App() {
     };
   }, [selectedProfileId, visualScenario]);
 
-  async function handleGenerate(imported = false) {
+  async function handleGenerate() {
     const threshold = Number(createForm.threshold);
     const count = Number(createForm.count);
-    const generated = await run(imported ? 'generating imported keyset' : 'generating keyset', () =>
-      imported
-        ? createImportedKeyset(threshold, count, createForm.nsec.trim())
-        : createGeneratedKeyset(threshold, count),
+    const generated = await run(
+      createForm.mode === 'rotate' ? 'rotating keyset' : 'generating keyset',
+      () =>
+        createForm.mode === 'rotate'
+          ? createRotatedKeyset({
+              threshold,
+              count,
+              sources: rotationSources.map((source) => ({
+                packageText: source.packageText,
+                packagePassword: source.packagePassword,
+              })),
+            })
+          : createGeneratedKeyset(threshold, count),
     );
     setGeneratedKeyset(generated);
+    const sourceProfile =
+      createForm.mode === 'rotate'
+        ? profiles.find((profile) => profile.id === createForm.sourceProfileId) ?? null
+        : null;
+    const sourceRelayProfile =
+      sourceProfile ? relayProfiles.find((profile) => profile.id === sourceProfile.relay_profile) ?? null : null;
     setSaveForms(
       Object.fromEntries(
         generated.shares.map(share => [
           share.member_idx,
           {
-            label: share.name,
+            label: createForm.mode === 'rotate' && sourceProfile ? sourceProfile.label : share.name,
             vaultPassphrase: '',
-            relayUrls: '',
+            relayUrls: sourceRelayProfile?.relays.join('\n') ?? '',
           },
         ]),
       ),
     );
+    setSelectedGeneratedShareIdx(null);
+    setDistributionForms(
+      Object.fromEntries(
+        generated.shares.map((share) => [
+          share.member_idx,
+          {
+            label: share.name,
+            packagePassword: '',
+            confirmPassword: '',
+          },
+        ]),
+      ),
+    );
+    setDistributionResults({});
+    setDistributionQr(null);
   }
 
   async function handleSaveGeneratedProfile(share: GeneratedKeysetShare) {
@@ -670,23 +756,59 @@ export default function App() {
     setVaultPassphrase(draft.vaultPassphrase);
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
-    setActiveView('dashboard');
+    setSelectedGeneratedShareIdx(share.member_idx);
+    setNotice('Local profile created. Distribute the remaining shares as bfonboard packages.');
+    setActiveView('create');
   }
 
-  async function handleImportRawProfile() {
-    const result = await run('importing raw profile', () =>
-      importProfileFromRaw({
-        label: importForm.label || undefined,
-        relayUrls: splitTextarea(importForm.relayUrls),
-        vaultPassphrase: importForm.vaultPassphrase,
-        groupPackageJson: importForm.groupPackageJson,
-        sharePackageJson: importForm.sharePackageJson,
+  async function handleDistributeGeneratedShare(memberIdx: number, kind: 'copy' | 'qr' | 'save') {
+    if (!generatedKeyset || selectedGeneratedShareIdx == null) {
+      throw new Error('Save the local profile before distributing remaining shares.');
+    }
+    const distribution = distributionForms[memberIdx];
+    if (!distribution?.label.trim()) {
+      throw new Error('share label is required');
+    }
+    if (!distribution.packagePassword || distribution.packagePassword !== distribution.confirmPassword) {
+      throw new Error('package password confirmation does not match');
+    }
+    const localDraft = saveForms[selectedGeneratedShareIdx];
+    const localShare = generatedKeyset.shares.find((share) => share.member_idx === selectedGeneratedShareIdx);
+    const targetShare = generatedKeyset.shares.find((share) => share.member_idx === memberIdx);
+    if (!localDraft || !localShare || !targetShare) {
+      throw new Error('generated share context is incomplete');
+    }
+    const packageText = await run('creating onboarding package', () =>
+      createGeneratedOnboardingPackage({
+        sharePackageJson: targetShare.share_package_json,
+        relayUrls: splitTextarea(localDraft.relayUrls),
+        peerPubkey: localShare.share_public_key,
+        packagePassword: distribution.packagePassword,
       }),
     );
-    const profile = unwrapImportedProfile(result);
-    setVaultPassphrase(importForm.vaultPassphrase);
-    await refreshProfiles(profile.id);
+    if (kind === 'copy' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(packageText);
+    }
+    if (kind === 'qr') {
+      setDistributionQr({ label: distribution.label, packageText });
+    }
+    if (kind === 'save') {
+      downloadText(`${distribution.label || `member-${memberIdx}`}-bfonboard.txt`, packageText);
+    }
+    setDistributionResults((current) => ({
+      ...current,
+      [memberIdx]: {
+        kind: kind === 'copy' ? 'copied' : kind === 'save' ? 'saved' : 'qr',
+        label: distribution.label,
+        packageText,
+      },
+    }));
+  }
+
+  function handleFinishDistribution() {
+    setDistributionQr(null);
     setActiveView('dashboard');
+    setActiveDashboardTab('signer');
   }
 
   async function handleOnboardProfile() {
@@ -728,6 +850,30 @@ export default function App() {
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
     setActiveView('dashboard');
+  }
+
+  async function handleRotateKey() {
+    if (!selectedProfileId) {
+      throw new Error('select a profile first');
+    }
+    const result = await run('rotating device key', () =>
+      applyRotationUpdate({
+        targetProfileId: selectedProfileId,
+        vaultPassphrase,
+        onboardingPassword: rotationForm.onboardingPassword,
+        onboardingPackage: rotationForm.onboardingPackage,
+      }),
+    );
+    const profile = unwrapImportedProfile(result);
+    setRotationForm({ onboardingPackage: '', onboardingPassword: '' });
+    setSelectedProfileId(profile.id);
+    await refreshProfiles(profile.id);
+    if (runtimeSnapshot?.active) {
+      await handleStartProfileSession(profile.id);
+    } else {
+      setActiveView('dashboard');
+      setActiveDashboardTab('settings');
+    }
   }
 
   async function handleStartProfileSession(profileId = selectedProfileId) {
@@ -883,7 +1029,7 @@ export default function App() {
         Profiles
       </Button>
       <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('create')}>
-        Create Keyset
+        Create / Rotate Keyset
       </Button>
       <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('load')}>
         Load Profile
@@ -922,9 +1068,9 @@ export default function App() {
             <div className="igloo-pwa-entry-grid">
               <EntryTile
                 kicker="Fresh setup"
-                title="Create Keyset"
+                title="Create / Rotate Keyset"
                 description="Generate new share material and save one managed desktop profile into the shell store."
-                actionLabel="Start Creating"
+                actionLabel="Start"
                 tone="primary"
                 onAction={() => setActiveView('create')}
                 icon={<svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 1 1 9.74 1.58L21 15v2h-2v2h-2v2h-3v-3.17a5 5 0 0 1-7-4.83Z" /><circle cx="10" cy="10" r="1.25" /></svg>}
@@ -952,24 +1098,40 @@ export default function App() {
 
       {activeView === 'create' ? (
         <ContentCard
-          title="Create Keyset"
-          description="Generate key material and save one managed desktop profile into the shell-managed vault."
+          title="Create / Rotate Keyset"
+          description="Generate a fresh keyset or rotate an existing one, then save one managed desktop profile into the shell-managed vault."
           onBack={() => setActiveView(profiles.length ? 'inventory' : 'landing')}
           backButtonTooltip="Back"
         >
           <CreatePage
             createForm={createForm}
-            importForm={importForm}
-            onboardingForm={onboardingForm}
+            availableProfiles={profiles.map((profile) => ({ id: profile.id, label: profile.label }))}
+            rotationSources={rotationSources}
             generatedKeyset={generatedKeyset}
             saveForms={saveForms}
+            selectedMemberIdx={selectedGeneratedShareIdx}
+            distributionForms={distributionForms}
+            distributionResults={Object.fromEntries(
+              Object.entries(distributionResults).map(([memberIdx, result]) => [
+                Number(memberIdx),
+                { kind: result.kind, label: result.label },
+              ]),
+            )}
             onChangeCreateForm={(field, value) => setCreateForm(current => ({ ...current, [field]: value }))}
-            onGenerateFresh={() => void handleGenerate(false)}
-            onGenerateImported={() => void handleGenerate(true)}
-            onChangeImportForm={(field, value) => setImportForm(current => ({ ...current, [field]: value }))}
-            onChangeOnboardingForm={(field, value) => setOnboardingForm(current => ({ ...current, [field]: value }))}
-            onImportOnboardingProfile={() => void handleOnboardProfile()}
-            onImportRawProfile={() => void handleImportRawProfile()}
+            onChangeRotationSource={(index, field, value) =>
+              setRotationSources((current) =>
+                current.map((source, sourceIndex) =>
+                  sourceIndex === index ? { ...source, [field]: value } : source,
+                ),
+              )
+            }
+            onAddRotationSource={() =>
+              setRotationSources((current) => [...current, { packageText: '', packagePassword: '' }])
+            }
+            onRemoveRotationSource={(index) =>
+              setRotationSources((current) => current.filter((_, sourceIndex) => sourceIndex !== index))
+            }
+            onGenerateFresh={() => void handleGenerate()}
             onChangeSaveForm={(memberIdx, field, value) =>
               setSaveForms(current => ({
                 ...current,
@@ -980,6 +1142,24 @@ export default function App() {
               }))
             }
             onSaveGeneratedProfile={share => void handleSaveGeneratedProfile(share)}
+            onChangeDistributionForm={(memberIdx, field, value) =>
+              setDistributionForms((current) => ({
+                ...current,
+                [memberIdx]: {
+                  ...(current[memberIdx] ?? { label: '', packagePassword: '', confirmPassword: '' }),
+                  [field]: value,
+                },
+              }))
+            }
+            onDistributeShare={(memberIdx, kind) => void handleDistributeGeneratedShare(memberIdx, kind)}
+            onFinishDistribution={handleFinishDistribution}
+          />
+          <QrPayloadModal
+            open={Boolean(distributionQr)}
+            onClose={() => setDistributionQr(null)}
+            title="Onboarding Package QR"
+            label={distributionQr?.label}
+            payload={distributionQr?.packageText ?? ''}
           />
         </ContentCard>
       ) : null}
@@ -1109,9 +1289,9 @@ export default function App() {
           title="Managed Profiles"
           description="Desktop inventory for all shell-managed profiles. Select one and open the operator dashboard."
         >
-          <div className="igloo-button-row">
+            <div className="igloo-button-row">
             <Button type="button" size="sm" onClick={() => setActiveView('create')}>
-              Create Keyset
+              Create / Rotate Keyset
             </Button>
             <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('load')}>
               Load Profile
@@ -1296,6 +1476,45 @@ export default function App() {
                         }
                       />
                     </label>
+                  </ContentCard>
+                  <ContentCard
+                    title="Rotate Key"
+                    description="Paste a rotated bfonboard package to replace the current device share in place while keeping this desktop profile context."
+                  >
+                    <div className="igloo-stack">
+                      <label>
+                        Onboarding password
+                        <input
+                          type="password"
+                          value={rotationForm.onboardingPassword}
+                          onChange={event =>
+                            setRotationForm(current => ({
+                              ...current,
+                              onboardingPassword: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        bfonboard
+                        <Textarea
+                          className="min-h-[140px]"
+                          placeholder="Paste bfonboard1..."
+                          value={rotationForm.onboardingPackage}
+                          onChange={event =>
+                            setRotationForm(current => ({
+                              ...current,
+                              onboardingPackage: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <div className="igloo-button-row">
+                        <Button type="button" size="sm" variant="secondary" onClick={() => void handleRotateKey()} disabled={!selectedProfileId}>
+                          Rotate Key
+                        </Button>
+                      </div>
+                    </div>
                   </ContentCard>
                   <DesktopSettingsExtras settings={settings} onToggle={(field, checked) => void handleToggleSetting(field, checked)} />
                 </>

@@ -107,6 +107,22 @@ export function recoverProfileFromBfshare(input: {
   }).catch(normalizeHomeImportError);
 }
 
+export function applyRotationUpdate(input: {
+  targetProfileId: string;
+  vaultPassphrase: string;
+  onboardingPassword: string;
+  onboardingPackage: string;
+}) {
+  return invoke<ProfileImportResult>('apply_rotation_update_command', {
+    input: {
+      target_profile_id: input.targetProfileId,
+      vault_passphrase: input.vaultPassphrase,
+      onboarding_password: input.onboardingPassword,
+      onboarding_package: input.onboardingPackage,
+    },
+  }).catch(normalizeHomeImportError);
+}
+
 export function removeProfile(profileId: string) {
   return invoke<void>('remove_profile_command', {
     input: { profile_id: profileId },
@@ -158,9 +174,39 @@ export function createGeneratedKeyset(threshold: number, count: number) {
   });
 }
 
-export function createImportedKeyset(threshold: number, count: number, nsec: string) {
-  return invoke<GeneratedKeyset>('create_imported_keyset_command', {
-    input: { threshold, count, nsec },
+export function createRotatedKeyset(input: {
+  threshold: number;
+  count: number;
+  sources: Array<{
+    packageText: string;
+    packagePassword: string;
+  }>;
+}) {
+  return invoke<GeneratedKeyset>('create_rotated_keyset_command', {
+    input: {
+      threshold: input.threshold,
+      count: input.count,
+      sources: input.sources.map((source) => ({
+        package: source.packageText,
+        package_password: source.packagePassword,
+      })),
+    },
+  });
+}
+
+export function createGeneratedOnboardingPackage(input: {
+  sharePackageJson: string;
+  relayUrls: string[];
+  peerPubkey: string;
+  packagePassword: string;
+}) {
+  return invoke<string>('create_generated_onboarding_package_command', {
+    input: {
+      share_package_json: input.sharePackageJson,
+      relay_urls: input.relayUrls,
+      peer_pubkey: input.peerPubkey,
+      package_password: input.packagePassword,
+    },
   });
 }
 

@@ -579,28 +579,11 @@ pub fn make_generated_onboarding_package(
 }
 
 fn group_from_payload(payload: &frostr_utils::BfProfilePayload) -> Result<GroupPackage> {
-    let members = payload
-        .group
-        .members
-        .iter()
-        .map(|member| {
-            let mut pubkey = [0u8; 33];
-            pubkey[0] = 0x02;
-            pubkey[1..].copy_from_slice(&hex::decode(&member.share_public_key)?);
-            Ok(bifrost_core::types::MemberPackage {
-                idx: member.index,
-                pubkey,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(GroupPackage {
-        group_pk: hex::decode(&payload.group.group_public_key)?
-            .try_into()
-            .map_err(|_| anyhow!("invalid group public key"))?,
-        threshold: payload.group.threshold,
-        members,
-    })
+    payload
+        .group_package
+        .clone()
+        .try_into()
+        .map_err(|e: bifrost_codec::CodecError| anyhow!("invalid group package: {e}"))
 }
 
 fn share_from_payload(group: &GroupPackage, payload: &frostr_utils::BfProfilePayload) -> Result<SharePackage> {

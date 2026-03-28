@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateKeysetRequest {
+    pub group_name: String,
     pub threshold: u16,
     pub count: u16,
 }

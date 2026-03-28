@@ -467,11 +467,12 @@ export default function App() {
   const [createForm, setCreateForm] = useState(
     {
       mode: 'new',
+      groupName: '',
       threshold: '2',
       count: '3',
       sourceProfileId: '',
       ...visualScenario?.createForm,
-    } as { mode: 'new' | 'rotate'; threshold: string; count: string; sourceProfileId: string },
+    } as { mode: 'new' | 'rotate'; groupName: string; threshold: string; count: string; sourceProfileId: string },
   );
   const [rotationSources, setRotationSources] = useState<RotationSourceDraft[]>(
     visualScenario?.rotationSources ?? [{ packageText: '', packagePassword: '' }],
@@ -686,8 +687,12 @@ export default function App() {
   }, [selectedProfileId, visualScenario]);
 
   async function handleGenerate() {
+    const groupName = createForm.groupName.trim();
     const threshold = Number(createForm.threshold);
     const count = Number(createForm.count);
+    if (!groupName) {
+      throw new Error('group name is required');
+    }
     const generated = await run(
       createForm.mode === 'rotate' ? 'rotating keyset' : 'generating keyset',
       () =>
@@ -700,7 +705,7 @@ export default function App() {
                 packagePassword: source.packagePassword,
               })),
             })
-          : createGeneratedKeyset(threshold, count),
+          : createGeneratedKeyset(groupName, threshold, count),
     );
     setGeneratedKeyset(generated);
     const sourceProfile =

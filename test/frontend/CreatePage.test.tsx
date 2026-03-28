@@ -8,7 +8,7 @@ describe('CreatePage', () => {
     const onAddRotationSource = vi.fn();
     render(
       <CreatePage
-        createForm={{ mode: 'rotate', threshold: '2', count: '3', sourceProfileId: '' }}
+        createForm={{ mode: 'rotate', groupName: 'Treasury Signing Group', threshold: '2', count: '3', sourceProfileId: '' }}
         availableProfiles={[{ id: 'alice', label: 'Alice Laptop' }]}
         rotationSources={[{ packageText: '', packagePassword: '' }]}
         generatedKeyset={null}

@@ -31,6 +31,7 @@ type VisualScenarioState = {
   runtimeSnapshot: ProfileRuntimeSnapshot | null;
   createForm: {
     mode?: 'new' | 'rotate';
+    groupName?: string;
     threshold: string;
     count: string;
     sourceProfileId?: string;
@@ -180,6 +181,7 @@ const baseState: VisualScenarioState = {
   runtimeSnapshot: null,
   createForm: {
     mode: 'new',
+    groupName: 'Treasury Signing Group',
     threshold: '2',
     count: '3',
     sourceProfileId: '',

@@ -426,8 +426,12 @@ pub fn maybe_handle_close_request(window: &tauri::Window, state: &AppState) -> R
     Ok(true)
 }
 
-pub fn make_generated_keyset(threshold: u16, count: u16) -> Result<GeneratedKeyset> {
-    let bundle = create_keyset(CreateKeysetConfig { threshold, count })?;
+pub fn make_generated_keyset(group_name: String, threshold: u16, count: u16) -> Result<GeneratedKeyset> {
+    let bundle = create_keyset(CreateKeysetConfig {
+        group_name,
+        threshold,
+        count,
+    })?;
     generated_keyset_response("generated", bundle.group, bundle.shares)
 }
 

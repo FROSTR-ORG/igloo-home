@@ -168,9 +168,9 @@ export function publishProfileBackup(input: { profileId: string; vaultPassphrase
   });
 }
 
-export function createGeneratedKeyset(threshold: number, count: number) {
+export function createGeneratedKeyset(groupName: string, threshold: number, count: number) {
   return invoke<GeneratedKeyset>('create_generated_keyset_command', {
-    input: { threshold, count },
+    input: { group_name: groupName, threshold, count },
   });
 }
 

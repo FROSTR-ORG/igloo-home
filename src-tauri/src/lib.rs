@@ -206,7 +206,7 @@ async fn update_profile_operator_settings_command(
 async fn create_generated_keyset_command(
     input: models::CreateKeysetRequest,
 ) -> std::result::Result<models::GeneratedKeyset, String> {
-    session::make_generated_keyset(input.threshold, input.count).map_err(error_message)
+    session::make_generated_keyset(input.group_name, input.threshold, input.count).map_err(error_message)
 }
 
 #[tauri::command]

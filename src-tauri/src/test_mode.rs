@@ -118,7 +118,7 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
         })(),
         "create_generated_keyset" => (|| -> anyhow::Result<Value> {
             let input: CreateKeysetRequest = serde_json::from_value(request.input)?;
-            let result = session::make_generated_keyset(input.threshold, input.count)?;
+            let result = session::make_generated_keyset(input.group_name, input.threshold, input.count)?;
             Ok(serde_json::to_value(result)?)
         })(),
         "create_rotated_keyset" => (|| -> anyhow::Result<Value> {

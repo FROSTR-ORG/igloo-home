@@ -22,6 +22,7 @@ type DistributionResult = {
 type Props = {
   createForm: {
     mode: 'new' | 'rotate';
+    groupName: string;
     threshold: string;
     count: string;
     sourceProfileId: string;
@@ -39,7 +40,7 @@ type Props = {
   selectedMemberIdx: number | null;
   distributionForms: Record<number, DistributionDraft>;
   distributionResults: Record<number, DistributionResult>;
-  onChangeCreateForm: (field: 'mode' | 'threshold' | 'count' | 'sourceProfileId', value: string) => void;
+  onChangeCreateForm: (field: 'mode' | 'groupName' | 'threshold' | 'count' | 'sourceProfileId', value: string) => void;
   onChangeRotationSource: (index: number, field: 'packageText' | 'packagePassword', value: string) => void;
   onAddRotationSource: () => void;
   onRemoveRotationSource: (index: number) => void;
@@ -108,6 +109,14 @@ export default function CreatePage({
 
       <div className="igloo-two-up">
         <label>
+          Group name
+          <input
+            value={createForm.groupName}
+            placeholder="Treasury Signing Group"
+            onChange={(event) => onChangeCreateForm('groupName', event.target.value)}
+          />
+        </label>
+        <label>
           Threshold
           <input
             type="number"
@@ -116,6 +125,9 @@ export default function CreatePage({
             onChange={(event) => onChangeCreateForm('threshold', event.target.value)}
           />
         </label>
+      </div>
+
+      <div className="igloo-two-up">
         <label>
           Member count
           <input
@@ -125,6 +137,13 @@ export default function CreatePage({
             onChange={(event) => onChangeCreateForm('count', event.target.value)}
           />
         </label>
+        <div className="igloo-panel">
+          <strong>Group identity</strong>
+          <p className="igloo-message-muted">
+            The group name is carried in the generated group package so operators can recognize which shares belong to
+            the same group.
+          </p>
+        </div>
       </div>
 
       {createForm.mode === 'rotate' ? (

@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "build:ui": "npm --prefix ../igloo-ui run build",
+    "build:app": "tsc && vite build && node ./scripts/check-built-css.mjs",
     "dev": "npm run build:ui && vite --host 0.0.0.0 --port 1420 --strictPort",
-    "build": "npm run build:ui && tsc && vite build && node ./scripts/check-built-css.mjs",
+    "build": "npm run build:ui && npm run build:app",
     "test:unit": "vitest run",
     "test:desktop": "node ./test/desktop/run.mjs",
     "test:visual": "node ./test/visual/run.mjs",

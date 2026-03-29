@@ -6,7 +6,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const repoRoot = path.resolve(process.cwd());
-const fixtureDir = path.resolve(repoRoot, '../../data/test-harness/demo-2of3');
+const fixtureRoot = process.env.FROSTR_TEST_HARNESS_DIR
+  ? path.resolve(process.env.FROSTR_TEST_HARNESS_DIR)
+  : path.resolve(repoRoot, '../../.tmp/test-harness');
+const fixtureDir = path.join(fixtureRoot, 'demo-2of3');
 
 if (!process.env.IGLOO_HOME_RUN_DESKTOP_TESTS) {
   console.log('igloo-home desktop tests skipped (set IGLOO_HOME_RUN_DESKTOP_TESTS=1 to enable)');

@@ -11,17 +11,17 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 use models::{
-    AppPathsResponse, AppSettings, AppSettingsEvent, ApplyRotationUpdateInput, CreateGeneratedOnboardingPackageInput,
-    ExportProfileInput, ExportProfilePackageInput, ImportProfileFromBfprofileInput,
+    AppPathsResponse, AppSettings, AppSettingsEvent, ApplyRotationUpdateInput,
+    ConnectOnboardingPackageInput, CreateGeneratedOnboardingPackageInput,
+    DiscardConnectedOnboardingResult, ExportProfileInput, ExportProfilePackageInput,
+    FinalizeConnectedOnboardingInput, ImportProfileFromBfprofileInput,
     ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
-    ProfileRuntimeSnapshot, PublishProfileBackupInput, RecoverProfileFromBfshareInput, RotateKeysetRequest,
-    RemoveProfileInput, ResolveCloseRequestInput, SettingsUpdateInput,
+    ProfileRuntimeSnapshot, PublishProfileBackupInput, RecoverProfileFromBfshareInput,
+    RemoveProfileInput, ResolveCloseRequestInput, RotateKeysetRequest, SettingsUpdateInput,
     StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
 };
 use paths::AppPaths;
-use session::{
-    AppState, load_last_session, make_app_state, maybe_handle_close_request,
-};
+use session::{AppState, load_last_session, make_app_state, maybe_handle_close_request};
 use session_log::read_session_log;
 use settings::{apply_launch_on_login, load_settings, save_settings};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -89,6 +89,37 @@ async fn import_profile_from_onboarding_command(
     )
     .await
     .map_err(error_message)
+}
+
+#[tauri::command]
+async fn connect_onboarding_package_command(
+    state: tauri::State<'_, AppState>,
+    input: ConnectOnboardingPackageInput,
+) -> std::result::Result<models::ConnectedOnboardingPreview, String> {
+    profiles::connect_onboarding_package(state.inner(), input.onboarding_password, &input.package)
+        .await
+        .map_err(error_message)
+}
+
+#[tauri::command]
+async fn finalize_connected_onboarding_command(
+    state: tauri::State<'_, AppState>,
+    input: FinalizeConnectedOnboardingInput,
+) -> std::result::Result<igloo_shell_core::shell::ProfileImportResult, String> {
+    profiles::finalize_connected_onboarding(
+        state.inner(),
+        input.label,
+        input.relay_profile,
+        input.vault_passphrase,
+    )
+    .map_err(error_message)
+}
+
+#[tauri::command]
+async fn discard_connected_onboarding_command(
+    state: tauri::State<'_, AppState>,
+) -> std::result::Result<DiscardConnectedOnboardingResult, String> {
+    Ok(profiles::discard_connected_onboarding(state.inner()))
 }
 
 #[tauri::command]
@@ -206,7 +237,8 @@ async fn update_profile_operator_settings_command(
 async fn create_generated_keyset_command(
     input: models::CreateKeysetRequest,
 ) -> std::result::Result<models::GeneratedKeyset, String> {
-    session::make_generated_keyset(input.group_name, input.threshold, input.count).map_err(error_message)
+    session::make_generated_keyset(input.group_name, input.threshold, input.count)
+        .map_err(error_message)
 }
 
 #[tauri::command]
@@ -367,6 +399,9 @@ fn show_main_window(app: &tauri::AppHandle) -> Result<()> {
 }
 
 fn sync_tray(app: &tauri::AppHandle) -> Result<()> {
+    if paths::is_test_mode() {
+        return Ok(());
+    }
     let state = app.state::<AppState>();
     let signer = state.signer.lock().unwrap();
     let has_active = signer.active.is_some();
@@ -511,6 +546,9 @@ pub fn run() {
             list_relay_profiles_command,
             import_profile_from_raw_command,
             import_profile_from_onboarding_command,
+            connect_onboarding_package_command,
+            finalize_connected_onboarding_command,
+            discard_connected_onboarding_command,
             import_profile_from_bfprofile_command,
             recover_profile_from_bfshare_command,
             apply_rotation_update_command,
@@ -557,7 +595,8 @@ fn maybe_run_profile_daemon() -> Option<Result<()>> {
         let profile = profile.ok_or_else(|| anyhow!("missing --profile"))?;
         let socket_path = socket_path.ok_or_else(|| anyhow!("missing --socket-path"))?;
         let token = token.ok_or_else(|| anyhow!("missing --token"))?;
-        let (_profile, resolved) = igloo_shell_core::shell::resolve_profile_runtime(&shell_paths, &profile)?;
+        let (_profile, resolved) =
+            igloo_shell_core::shell::resolve_profile_runtime(&shell_paths, &profile)?;
         bifrost_app::host::run_resolved_daemon(
             resolved,
             bifrost_app::host::DaemonTransportConfig {

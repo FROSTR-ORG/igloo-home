@@ -6,7 +6,8 @@ import {
   AppHeader,
   Button,
   ContentCard,
-  ManagedProfilesPanel,
+  HostEntryTile,
+  HostFlowShell,
   OperatorDashboardTabs,
   OperatorPermissionsPanel,
   type OperatorPeerPermissionState,
@@ -14,7 +15,10 @@ import {
   OperatorSettingsPanel,
   OperatorSignerPanel,
   PageLayout,
+  ProfileConfirmationCard,
   QrPayloadModal,
+  StepProgress,
+  StoredProfilesLandingCard,
   Textarea,
   type LogEntry,
   type OperatorSignerSettings,
@@ -22,14 +26,16 @@ import {
 } from 'igloo-ui';
 import {
   applyRotationUpdate,
+  connectOnboardingPackage,
   createGeneratedOnboardingPackage,
   createGeneratedKeyset,
   createRotatedKeyset,
+  discardConnectedOnboarding,
   exportProfile,
   exportProfilePackage,
+  finalizeConnectedOnboarding,
   getSettings,
   importProfileFromBfprofile,
-  importProfileFromOnboarding,
   importProfileFromRaw,
   listProfiles,
   listRelayProfiles,
@@ -55,6 +61,7 @@ import type {
   AppSettings,
   AppSettingsEvent,
   AppTestNavigateEvent,
+  ConnectedOnboardingPreview,
   CloseRequestEvent,
   GeneratedKeyset,
   GeneratedKeysetShare,
@@ -69,9 +76,8 @@ import type {
 import { installTestBridge } from '@/lib/testBridge';
 import { resolveVisualScenario } from '@/test/visualMode';
 import CreatePage from '@/pages/CreatePage';
-import SharesPage from '@/pages/SharesPage';
 
-type ViewKey = 'landing' | 'create' | 'load' | 'onboard' | 'inventory' | 'dashboard';
+type ViewKey = 'landing' | 'create' | 'load' | 'onboard-connect' | 'onboard-save' | 'dashboard';
 type DashboardTab = 'signer' | 'permissions' | 'settings';
 
 type SaveDraft = {
@@ -100,6 +106,17 @@ type DistributionResult = {
 type RotationDraft = {
   onboardingPackage: string;
   onboardingPassword: string;
+};
+
+type OnboardConnectDraft = {
+  packageText: string;
+  password: string;
+};
+
+type OnboardSaveDraft = {
+  label: string;
+  vaultPassphrase: string;
+  confirmPassphrase: string;
 };
 
 type PackageExportDraft = {
@@ -365,44 +382,6 @@ function toLogEntries(lines: string[] = []): LogEntry[] {
   }));
 }
 
-function LandingIcon({ children }: { children: React.ReactNode }) {
-  return <div className="igloo-pwa-entry-icon" aria-hidden="true">{children}</div>;
-}
-
-function EntryTile({
-  kicker,
-  title,
-  description,
-  actionLabel,
-  tone = 'secondary',
-  icon,
-  onAction,
-}: {
-  kicker: string;
-  title: string;
-  description: string;
-  actionLabel: string;
-  tone?: 'primary' | 'secondary';
-  icon: React.ReactNode;
-  onAction: () => void;
-}) {
-  return (
-    <section className={`igloo-panel igloo-pwa-entry-tile ${tone === 'primary' ? 'is-primary' : ''}`}>
-      <div className="igloo-pwa-entry-head">
-        <LandingIcon>{icon}</LandingIcon>
-        <div className="igloo-pwa-entry-copy">
-          <span className="igloo-pwa-entry-kicker">{kicker}</span>
-          <h3>{title}</h3>
-          <p>{description}</p>
-        </div>
-      </div>
-      <Button type="button" size="sm" variant={tone === 'primary' ? 'default' : 'secondary'} onClick={onAction}>
-        {actionLabel}
-      </Button>
-    </section>
-  );
-}
-
 function DesktopSettingsExtras({
   settings,
   onToggle,
@@ -491,13 +470,21 @@ export default function App() {
       sharePackageJson: '',
     },
   );
-  const [onboardingForm, setOnboardingForm] = useState(
-    visualScenario?.onboardingForm ?? {
+  const [onboardConnectForm, setOnboardConnectForm] = useState<OnboardConnectDraft>(
+    visualScenario?.onboardConnectForm ?? {
       packageText: '',
       password: '',
-      vaultPassphrase: '',
-      label: '',
     },
+  );
+  const [onboardSaveForm, setOnboardSaveForm] = useState<OnboardSaveDraft>(
+    visualScenario?.onboardSaveForm ?? {
+      label: '',
+      vaultPassphrase: '',
+      confirmPassphrase: '',
+    },
+  );
+  const [pendingOnboardConnection, setPendingOnboardConnection] = useState<ConnectedOnboardingPreview | null>(
+    visualScenario?.pendingOnboardConnection ?? null,
   );
   const [rotationForm, setRotationForm] = useState<RotationDraft>(
     visualScenario?.rotationForm ?? {
@@ -572,8 +559,8 @@ export default function App() {
       return nextProfiles[0]?.id ?? '';
     });
     setActiveView(current => {
-      if (!nextProfiles.length) return 'landing';
-      return current === 'landing' ? 'inventory' : current;
+      if (current === 'dashboard' && !nextProfiles.length) return 'landing';
+      return current;
     });
   }
 
@@ -598,7 +585,7 @@ export default function App() {
       setRelayProfiles(nextRelayProfiles);
       const firstProfileId = nextProfiles[0]?.id ?? '';
       setSelectedProfileId(firstProfileId);
-      setActiveView(nextProfiles.length ? 'inventory' : 'landing');
+      setActiveView('landing');
       setRuntimeSnapshot(await profileRuntimeSnapshot(firstProfileId || null));
     } catch (err) {
       setError(String(err));
@@ -623,6 +610,12 @@ export default function App() {
     }
     void refreshRuntime(selectedProfileId);
   }, [selectedProfileId, visualScenario]);
+
+  useEffect(() => {
+    if (activeView === 'onboard-save' && !pendingOnboardConnection) {
+      setActiveView('onboard-connect');
+    }
+  }, [activeView, pendingOnboardConnection]);
 
   useEffect(() => {
     if (visualScenario) {
@@ -669,7 +662,8 @@ export default function App() {
             view === 'landing' ||
             view === 'create' ||
             view === 'load' ||
-            view === 'inventory' ||
+            view === 'onboard-connect' ||
+            view === 'onboard-save' ||
             view === 'dashboard'
           ) {
             setActiveView(view);
@@ -816,20 +810,49 @@ export default function App() {
     setActiveDashboardTab('signer');
   }
 
-  async function handleOnboardProfile() {
-    const result = await run('onboarding managed profile', () =>
-      importProfileFromOnboarding({
-        label: onboardingForm.label || undefined,
-        vaultPassphrase: onboardingForm.vaultPassphrase,
-        onboardingPassword: onboardingForm.password,
-        package: onboardingForm.packageText,
+  async function handleConnectOnboardingPackage() {
+    const connection = await run('connecting onboarding package', () =>
+      connectOnboardingPackage({
+        onboardingPassword: onboardConnectForm.password,
+        package: onboardConnectForm.packageText,
+      }),
+    );
+    setPendingOnboardConnection(connection);
+    setOnboardSaveForm(current => ({
+      ...current,
+      label: connection.preview.label,
+    }));
+    setActiveView('onboard-save');
+  }
+
+  async function handleFinalizeOnboardingProfile() {
+    if (!pendingOnboardConnection) {
+      throw new Error('connect an onboarding package first');
+    }
+    if (onboardSaveForm.vaultPassphrase !== onboardSaveForm.confirmPassphrase) {
+      throw new Error('vault passphrase confirmation does not match');
+    }
+    const result = await run('saving onboarded device', () =>
+      finalizeConnectedOnboarding({
+        label: onboardSaveForm.label || undefined,
+        vaultPassphrase: onboardSaveForm.vaultPassphrase,
       }),
     );
     const profile = unwrapImportedProfile(result);
-    setVaultPassphrase(onboardingForm.vaultPassphrase);
+    setVaultPassphrase(onboardSaveForm.vaultPassphrase);
+    setPendingOnboardConnection(null);
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
     setActiveView('dashboard');
+    setActiveDashboardTab('signer');
+  }
+
+  async function handleDiscardOnboardingConnection(nextView: ViewKey = 'onboard-connect') {
+    if (pendingOnboardConnection) {
+      await run('discarding onboarding preview', () => discardConnectedOnboarding());
+      setPendingOnboardConnection(null);
+    }
+    setActiveView(nextView);
   }
 
   async function handleLoadPackage() {
@@ -855,6 +878,7 @@ export default function App() {
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
     setActiveView('dashboard');
+    setActiveDashboardTab('signer');
   }
 
   async function handleRotateKey() {
@@ -900,6 +924,16 @@ export default function App() {
     setRuntimeSnapshot(snapshot);
     setActiveView('dashboard');
     setActiveDashboardTab('signer');
+  }
+
+  async function handleLandingProfileAction(profileId: string) {
+    setSelectedProfileId(profileId);
+    if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id === profileId) {
+      setActiveView('dashboard');
+      setActiveDashboardTab('signer');
+      return;
+    }
+    await handleStartProfileSession(profileId);
   }
 
   async function handleStopProfileSession() {
@@ -1028,34 +1062,12 @@ export default function App() {
     });
   }
 
-  const headerActions = profiles.length ? (
-    <>
-      <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('inventory')}>
-        Profiles
-      </Button>
-      <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('create')}>
-        Create / Rotate Keyset
-      </Button>
-      <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('load')}>
-        Load Profile
-      </Button>
-      <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('onboard')}>
-        Onboard Device
-      </Button>
-      {selectedProfile ? (
-        <Button type="button" size="sm" onClick={() => setActiveView('dashboard')}>
-          Open Dashboard
-        </Button>
-      ) : null}
-    </>
-  ) : null;
-
   return (
     <PageLayout>
       <AppHeader
-        title="igloo"
-        subtitle="Desktop multi-profile operator over the shell-managed FROSTR V2 backend."
-        right={headerActions}
+        title="Igloo Home"
+        centered
+        subtitle="Desktop operator workspace over the shell-managed FROSTR V2 backend."
       />
 
       {busy ? <div className="igloo-message-muted">Working: {busy}</div> : null}
@@ -1063,24 +1075,55 @@ export default function App() {
       {notice ? <div className="igloo-message-muted">{notice}</div> : null}
 
       {activeView === 'landing' ? (
-        <ContentCard title="Welcome to Igloo Home" description="Choose how to initialize this desktop workspace.">
+        <ContentCard title="Welcome to Igloo" description="Choose one path to initialize this desktop workspace.">
           <section className="igloo-flow-root igloo-pwa-entry-shell">
             <div className="igloo-pwa-entry-intro">
               <p className="igloo-pwa-entry-lead">
-                Create a new keyset, load an encrypted device profile, or onboard a new device from a protected package.
+                Create or rotate a keyset, load an existing profile, or finish onboarding a device from an accepted package.
               </p>
             </div>
+            <StoredProfilesLandingCard
+              profiles={profiles.map((profile) => ({
+                id: profile.id,
+                label: profile.label || 'Unnamed device',
+                subtitle:
+                  activeProfileId === profile.id
+                    ? `${shortProfileId(profile.id)} · signer active`
+                    : shortProfileId(profile.id),
+                actionLabel: activeProfileId === profile.id ? 'Open Dashboard' : 'Load Profile',
+              }))}
+              description="Managed desktop profiles remain available while locked. Enter the vault passphrase below before loading one."
+              onAction={(profileId) => void handleLandingProfileAction(profileId)}
+              footer={
+                profiles.length ? (
+                  <div className="igloo-stack">
+                    <label>
+                      Vault passphrase
+                      <input
+                        type="password"
+                        value={vaultPassphrase}
+                        onChange={event => setVaultPassphrase(event.target.value)}
+                        placeholder="Required to unlock a stored desktop profile"
+                      />
+                    </label>
+                    <p className="igloo-message-muted">
+                      Use the shell vault passphrase for the selected desktop profile to unlock and start the signer session.
+                    </p>
+                  </div>
+                ) : null
+              }
+            />
             <div className="igloo-pwa-entry-grid">
-              <EntryTile
+              <HostEntryTile
                 kicker="Fresh setup"
                 title="Create / Rotate Keyset"
-                description="Generate new share material and save one managed desktop profile into the shell store."
+                description="Generate new share material or rotate an existing keyset, save one local desktop device, and distribute the remaining shares."
                 actionLabel="Start"
                 tone="primary"
                 onAction={() => setActiveView('create')}
                 icon={<svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 1 1 9.74 1.58L21 15v2h-2v2h-2v2h-3v-3.17a5 5 0 0 1-7-4.83Z" /><circle cx="10" cy="10" r="1.25" /></svg>}
               />
-              <EntryTile
+              <HostEntryTile
                 kicker="Existing device"
                 title="Load Profile"
                 description="Import a full `bfprofile` package or recover a device from a protected `bfshare`."
@@ -1088,12 +1131,12 @@ export default function App() {
                 onAction={() => setActiveView('load')}
                 icon={<svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.97 3.06 8.77 8 10 4.94-1.23 8-5.03 8-10V7l-8-4Z" /><path d="M12 8v6m0 0 3-3m-3 3-3-3" /></svg>}
               />
-              <EntryTile
+              <HostEntryTile
                 kicker="Accepted invite"
                 title="Onboard Device"
                 description="Use a password-protected `bfonboard` package to complete native onboarding and save the resulting profile."
                 actionLabel="Continue Onboarding"
-                onAction={() => setActiveView('onboard')}
+                onAction={() => setActiveView('onboard-connect')}
                 icon={<svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2" /><path d="M9 8h6M9 12h6M12 16h.01" /></svg>}
               />
             </div>
@@ -1102,12 +1145,23 @@ export default function App() {
       ) : null}
 
       {activeView === 'create' ? (
-        <ContentCard
+        <HostFlowShell
           title="Create / Rotate Keyset"
-          description="Generate a fresh keyset or rotate an existing one, then save one managed desktop profile into the shell-managed vault."
-          onBack={() => setActiveView(profiles.length ? 'inventory' : 'landing')}
-          backButtonTooltip="Back"
+          description="Step through the same host workflow as the PWA, then save one managed desktop profile into the shell-managed vault."
+          onBack={() => setActiveView('landing')}
+          backTooltip="Back"
         >
+          <div className="igloo-stack">
+            <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={generatedKeyset ? 1 : 0} />
+            <section className="igloo-task-banner">
+              <span className="igloo-task-kicker">Create or Rotate</span>
+              <p>Provide the group name and threshold geometry, then create or rebuild the keyset before saving one local desktop device.</p>
+              <div className="igloo-task-points">
+                <span>The group name identifies the shared group and the shares issued from it.</span>
+                <span>Rotation preserves the same group public key and issues fresh device shares.</span>
+              </div>
+            </section>
+          </div>
           <CreatePage
             createForm={createForm}
             availableProfiles={profiles.map((profile) => ({ id: profile.id, label: profile.label }))}
@@ -1166,17 +1220,22 @@ export default function App() {
             label={distributionQr?.label}
             payload={distributionQr?.packageText ?? ''}
           />
-        </ContentCard>
+        </HostFlowShell>
       ) : null}
 
       {activeView === 'load' ? (
-        <ContentCard
+        <HostFlowShell
           title="Load Profile"
-          description="Import a protected `bfprofile` or recover a desktop profile from `bfshare + kind:10000`."
-          onBack={() => setActiveView(profiles.length ? 'inventory' : 'landing')}
-          backButtonTooltip="Back"
+          description="Choose whether to import a full device profile or recover one from your protected share."
+          onBack={() => setActiveView('landing')}
+          backTooltip="Back"
         >
           <div className="igloo-flow-root igloo-stack">
+            <StepProgress steps={['Import or recover', 'Load device']} active={0} />
+            <section className="igloo-task-banner">
+              <span className="igloo-task-kicker">Load a desktop device</span>
+              <p>Import a protected `bfprofile` or recover from a protected `bfshare`, then save the resulting desktop profile into the local shell vault.</p>
+            </section>
             <div className="igloo-button-row">
               <Button
                 type="button"
@@ -1235,120 +1294,128 @@ export default function App() {
               </Button>
             </div>
           </div>
-        </ContentCard>
+        </HostFlowShell>
       ) : null}
 
-      {activeView === 'onboard' ? (
-        <ContentCard
+      {activeView === 'onboard-connect' ? (
+        <HostFlowShell
           title="Onboard Device"
-          description="Import a protected onboarding package and save the resulting native desktop profile."
-          onBack={() => setActiveView(profiles.length ? 'inventory' : 'landing')}
-          backButtonTooltip="Back"
+          description="Connect with a protected onboarding package, resolve the handshake, then review the device before saving it locally."
+          onBack={() => setActiveView('landing')}
+          backTooltip="Back"
         >
           <div className="igloo-flow-root igloo-stack">
-            <label>
-              Device label
-              <input
-                value={onboardingForm.label}
-                onChange={event => setOnboardingForm(current => ({ ...current, label: event.target.value }))}
-              />
-            </label>
-            <label>
-              Vault passphrase
-              <input
-                type="password"
-                value={onboardingForm.vaultPassphrase}
-                onChange={event =>
-                  setOnboardingForm(current => ({ ...current, vaultPassphrase: event.target.value }))
-                }
-              />
-            </label>
+            <StepProgress steps={['Connect with package', 'Save device']} active={0} />
+            <section className="igloo-task-banner">
+              <span className="igloo-task-kicker">Desktop onboarding</span>
+              <p>The desktop host resolves the onboarding handshake first, then shows the same review-and-save step that the PWA uses before creating the managed profile.</p>
+            </section>
             <label>
               Package password
               <input
                 type="password"
-                value={onboardingForm.password}
-                onChange={event => setOnboardingForm(current => ({ ...current, password: event.target.value }))}
+                value={onboardConnectForm.password}
+                onChange={event => setOnboardConnectForm(current => ({ ...current, password: event.target.value }))}
               />
             </label>
             <label>
               bfonboard
               <Textarea
                 className="min-h-[160px]"
-                value={onboardingForm.packageText}
-                onChange={event => setOnboardingForm(current => ({ ...current, packageText: event.target.value }))}
+                value={onboardConnectForm.packageText}
+                onChange={event => setOnboardConnectForm(current => ({ ...current, packageText: event.target.value }))}
                 placeholder="Paste bfonboard1..."
               />
             </label>
             <div className="igloo-button-row">
-              <Button type="button" size="sm" onClick={() => void handleOnboardProfile()}>
-                Onboard Device
+              <Button type="button" size="sm" onClick={() => void handleConnectOnboardingPackage()}>
+                Connect
               </Button>
             </div>
           </div>
-        </ContentCard>
+        </HostFlowShell>
       ) : null}
 
-      {activeView === 'inventory' ? (
-        <ContentCard
-          title="Managed Profiles"
-          description="Desktop inventory for all shell-managed profiles. Select one and open the operator dashboard."
+      {activeView === 'onboard-save' && pendingOnboardConnection ? (
+        <HostFlowShell
+          title="Save Onboarded Device"
+          description="Review the resolved profile details and choose the passphrase used to store this desktop device locally."
+          onBack={() => void handleDiscardOnboardingConnection('onboard-connect')}
+          backTooltip="Back to connect"
         >
+          <div className="igloo-flow-root igloo-stack">
+            <StepProgress steps={['Connect with package', 'Save device']} active={1} />
+            <ProfileConfirmationCard
+              title="Review Onboarded Profile"
+              profileName={pendingOnboardConnection.preview.label}
+              sharePublicKey={pendingOnboardConnection.preview.share_public_key}
+              groupPublicKey={pendingOnboardConnection.preview.group_public_key}
+              relays={pendingOnboardConnection.preview.relays}
+            />
+            <section className="igloo-task-banner">
+              <span className="igloo-task-kicker">Handshake complete</span>
+              <p>The onboarding package has been resolved. Confirm the device label and passphrase before saving this managed desktop profile.</p>
+            </section>
+            <label>
+              Device label
+              <input
+                value={onboardSaveForm.label}
+                onChange={event => setOnboardSaveForm(current => ({ ...current, label: event.target.value }))}
+              />
+            </label>
+            <label>
+              Vault passphrase
+              <input
+                type="password"
+                value={onboardSaveForm.vaultPassphrase}
+                onChange={event =>
+                  setOnboardSaveForm(current => ({ ...current, vaultPassphrase: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Confirm vault passphrase
+              <input
+                type="password"
+                value={onboardSaveForm.confirmPassphrase}
+                onChange={event =>
+                  setOnboardSaveForm(current => ({ ...current, confirmPassphrase: event.target.value }))
+                }
+              />
+            </label>
             <div className="igloo-button-row">
-            <Button type="button" size="sm" onClick={() => setActiveView('create')}>
-              Create / Rotate Keyset
-            </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('load')}>
-              Load Profile
-            </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={() => setActiveView('onboard')}>
-              Onboard Device
-            </Button>
+              <Button type="button" size="sm" variant="secondary" onClick={() => void handleDiscardOnboardingConnection('onboard-connect')}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={() => void handleFinalizeOnboardingProfile()}>
+                Save Device
+              </Button>
+            </div>
           </div>
-          <SharesPage
-            profiles={profiles}
-            selectedProfileId={selectedProfileId}
-            activeProfileId={activeProfileId}
-            selectedProfile={selectedProfile}
-            vaultPassphrase={vaultPassphrase}
-            onSelectProfile={setSelectedProfileId}
-            onOpenSigner={profileId => {
-              setSelectedProfileId(profileId);
-              setActiveView('dashboard');
-              setActiveDashboardTab('signer');
-            }}
-            onActivateProfile={profileId => void handleStartProfileSession(profileId)}
-            onStopActiveProfile={() => void handleStopProfileSession()}
-            onChangeVaultPassphrase={setVaultPassphrase}
-            onDelete={profileId => void handleRemoveProfile(profileId)}
-            onExport={profileId => void handleExportRawProfile(profileId)}
-            onRefresh={() => void refreshProfiles(selectedProfileId)}
-          />
-        </ContentCard>
+        </HostFlowShell>
       ) : null}
 
       {activeView === 'dashboard' ? (
-        <section className="igloo-flow-root igloo-stack">
-          <ContentCard
-            title={
-              selectedProfile
-                ? `${selectedProfile.label} (${shortProfileId(selectedProfile.id)})`
-                : 'Operator Dashboard'
-            }
-            description="Shared operator controls for the selected managed desktop profile."
-            onBack={() => setActiveView('inventory')}
-            backButtonTooltip="Back to profiles"
-          >
+        <HostFlowShell
+          title={
+            selectedProfile
+              ? `Device Dashboard · ${selectedProfile.label} (${shortProfileId(selectedProfile.id)})`
+              : 'Device Dashboard'
+          }
+          description="Desktop operator console for the selected managed signer profile."
+          onBack={() => setActiveView('landing')}
+          backTooltip="Back to landing"
+        >
+          <section className="igloo-flow-root igloo-stack">
             <OperatorDashboardTabs
               tabs={[
-                { key: 'signer', label: 'Signer', description: 'Runtime, peers, and diagnostics' },
-                { key: 'permissions', label: 'Permissions', description: 'Peer policy state' },
-                { key: 'settings', label: 'Settings', description: 'Profile, relay, and desktop controls' },
+                { key: 'signer', label: 'Signer', description: 'runtime console' },
+                { key: 'permissions', label: 'Permissions', description: 'peer policies' },
+                { key: 'settings', label: 'Settings', description: 'operator controls' },
               ]}
               activeTab={activeDashboardTab}
               onChangeTab={value => setActiveDashboardTab(value as DashboardTab)}
             />
-          </ContentCard>
 
           {activeDashboardTab === 'signer' ? (
             <OperatorSignerPanel
@@ -1363,7 +1430,7 @@ export default function App() {
                     }
                   : null
               }
-              introMessage="Operate the active native signer session for the selected shell-managed profile."
+              introMessage="The desktop signer runs through the shell-managed runtime. This dashboard mirrors the same operator workflow used by the PWA host."
               runtimeState={
                 runtimeSnapshot?.active ? 'running' : busy === 'starting managed profile' ? 'connecting' : 'stopped'
               }
@@ -1386,7 +1453,7 @@ export default function App() {
             <OperatorPermissionsPanel
               peerPermissions={[]}
               peerPermissionStates={peerPermissionStates}
-              peerDescription="Peer policy state persisted for the selected managed profile."
+              peerDescription="Live outbound and inbound peer policy state for the active desktop signer."
               onRefresh={() => void refreshRuntime(selectedProfileId || null)}
             />
           ) : null}
@@ -1526,7 +1593,8 @@ export default function App() {
               }
             />
           ) : null}
-        </section>
+          </section>
+        </HostFlowShell>
       ) : null}
     </PageLayout>
   );

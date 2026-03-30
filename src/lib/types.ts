@@ -100,6 +100,26 @@ export type ProfileImportResult =
       warnings: string[];
     };
 
+export type OnboardingPreview = {
+  profile_id: string;
+  label: string;
+  share_public_key: string;
+  group_public_key: string;
+  threshold: number;
+  total_count: number;
+  relays: string[];
+  peer_pubkey: string | null;
+  source: string;
+};
+
+export type ConnectedOnboardingPreview = {
+  preview: OnboardingPreview;
+};
+
+export type DiscardConnectedOnboardingResult = {
+  discarded: boolean;
+};
+
 export type ProfileExportResult = {
   profile_id: string;
   out_dir: string;
@@ -166,7 +186,7 @@ export type AppSettingsEvent = {
 };
 
 export type AppTestNavigateEvent = {
-  view: 'landing' | 'create' | 'load' | 'inventory' | 'dashboard' | 'settings';
+  view: 'landing' | 'create' | 'load' | 'onboard-connect' | 'onboard-save' | 'dashboard' | 'settings';
   profile_id?: string | null;
   signer_tab?: 'signer' | 'permissions' | 'settings' | null;
 };

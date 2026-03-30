@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   AppPathsResponse,
   AppSettings,
+  ConnectedOnboardingPreview,
+  DiscardConnectedOnboardingResult,
   GeneratedKeyset,
   ProfileBackupPublishResult,
   ProfileExportResult,
@@ -69,6 +71,36 @@ export function importProfileFromOnboarding(input: {
       package: input.package,
     },
   }).catch(normalizeHomeImportError);
+}
+
+export function connectOnboardingPackage(input: {
+  onboardingPassword: string;
+  package: string;
+}) {
+  return invoke<ConnectedOnboardingPreview>('connect_onboarding_package_command', {
+    input: {
+      onboarding_password: input.onboardingPassword,
+      package: input.package,
+    },
+  }).catch(normalizeHomeImportError);
+}
+
+export function finalizeConnectedOnboarding(input: {
+  label?: string;
+  relayProfile?: string | null;
+  vaultPassphrase: string;
+}) {
+  return invoke<ProfileImportResult>('finalize_connected_onboarding_command', {
+    input: {
+      label: input.label ?? null,
+      relay_profile: input.relayProfile ?? null,
+      vault_passphrase: input.vaultPassphrase,
+    },
+  }).catch(normalizeHomeImportError);
+}
+
+export function discardConnectedOnboarding() {
+  return invoke<DiscardConnectedOnboardingResult>('discard_connected_onboarding_command');
 }
 
 export function importProfileFromBfprofile(input: {

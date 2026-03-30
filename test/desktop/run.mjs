@@ -264,11 +264,11 @@ try {
   }
 
   await sendRequest('navigate_view', {
-    view: 'inventory',
+    view: 'landing',
     profile_id: importResult.profile.id,
   });
   await sleep(1200);
-  const seededInventoryShot = await captureWindow(windowId, 'inventory-seeded');
+  const seededLandingShot = await captureWindow(windowId, 'landing-seeded');
 
   await sendRequest('navigate_view', {
     view: 'dashboard',
@@ -280,7 +280,7 @@ try {
 
   console.log(`igloo-home desktop smoke passed`);
   console.log(`artifacts: ${artifactDir}`);
-  console.log(`screenshots: ${landingShot}, ${seededInventoryShot}, ${signerShot}`);
+  console.log(`screenshots: ${landingShot}, ${seededLandingShot}, ${signerShot}`);
 } catch (error) {
   console.error(`igloo-home desktop smoke failed: ${error instanceof Error ? error.message : String(error)}`);
   console.error(`artifacts: ${artifactDir}`);

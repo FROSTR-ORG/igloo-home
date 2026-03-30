@@ -10,7 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Result, anyhow, bail};
 use bech32::{Bech32, Hrp};
 use bifrost_app::runtime::{
-    EncryptedFileStore, ResolvedAppConfig, begin_run, complete_clean_run, load_or_init_signer_resolved,
+    EncryptedFileStore, ResolvedAppConfig, begin_run, complete_clean_run,
+    load_or_init_signer_resolved,
 };
 use bifrost_bridge_tokio::{Bridge, BridgeConfig, NostrSdkAdapter};
 use bifrost_codec::{encode_group_package_json, encode_share_package_json, parse_share_package};
@@ -18,24 +19,24 @@ use bifrost_core::get_group_id;
 use bifrost_core::types::{GroupPackage, SharePackage};
 use bifrost_signer::DeviceStore;
 use frostr_utils::{
-    BfOnboardPayload, CreateKeysetConfig, RecoverKeyInput, RotateKeysetRequest,
-    create_keyset, encode_bfonboard_package, recover_key, rotate_keyset_dealer,
+    BfOnboardPayload, CreateKeysetConfig, RecoverKeyInput, RotateKeysetRequest, create_keyset,
+    encode_bfonboard_package, recover_key, rotate_keyset_dealer,
+};
+use igloo_shell_core::shell::{
+    ConnectedOnboardingImport, ProfileManifest, ShellPaths, daemon_log_path as profile_log_path,
+    preview_bfshare_recovery, read_daemon_metadata, resolve_profile_runtime,
 };
 use k256::elliptic_curve::sec1::ToEncodedPoint;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
-use igloo_shell_core::shell::{
-    ProfileManifest, ShellPaths, daemon_log_path as profile_log_path, preview_bfshare_recovery,
-    read_daemon_metadata, resolve_profile_runtime,
-};
 
 use crate::events::{
     EVENT_APP_CLOSE_REQUESTED, EVENT_SIGNER_LIFECYCLE, EVENT_SIGNER_LOG, EVENT_SIGNER_STATUS,
 };
 use crate::models::{
-    CloseRequestEvent, GeneratedKeyset, GeneratedKeysetShare, ProfileRuntimeSnapshot, RotationSourceInput,
-    SessionResume, SignerLifecycleEvent, SignerLogEntry, SignerLogEvent, SignerStatusEvent,
-    StartProfileSessionRequest,
+    CloseRequestEvent, GeneratedKeyset, GeneratedKeysetShare, ProfileRuntimeSnapshot,
+    RotationSourceInput, SessionResume, SignerLifecycleEvent, SignerLogEntry, SignerLogEvent,
+    SignerStatusEvent, StartProfileSessionRequest,
 };
 use crate::paths::AppPaths;
 use crate::session_log::{append_session_log, read_session_log};
@@ -51,8 +52,13 @@ pub struct AppState {
     pub paths: AppPaths,
     pub shell_paths: ShellPaths,
     pub signer: Arc<Mutex<SignerState>>,
+    pub pending_onboarding: Mutex<Option<PendingOnboardingState>>,
     pub settings: Mutex<crate::models::AppSettings>,
     pub close: Mutex<CloseState>,
+}
+
+pub struct PendingOnboardingState {
+    pub connected: ConnectedOnboardingImport,
 }
 
 pub struct SignerState {
@@ -98,6 +104,7 @@ pub fn make_app_state(
             logs: VecDeque::new(),
             last_session,
         })),
+        pending_onboarding: Mutex::new(None),
         settings: Mutex::new(settings),
         close: Mutex::new(CloseState::default()),
     }
@@ -182,7 +189,10 @@ async fn start_profile_session_resolved(
 
     {
         let mut guard = state.signer.lock().unwrap();
-        let entry = make_log("info", format!("started profile session for '{}'", profile.label));
+        let entry = make_log(
+            "info",
+            format!("started profile session for '{}'", profile.label),
+        );
         guard.logs.push_back(entry.clone());
         trim_logs(&mut guard.logs);
         append_session_log(&state.paths, &runtime_dir, &entry)?;
@@ -253,8 +263,15 @@ pub async fn profile_session_snapshot(
     state: &AppState,
     profile_id: Option<String>,
 ) -> Result<ProfileRuntimeSnapshot> {
-    let requested_profile = profile_id
-        .or_else(|| state.signer.lock().unwrap().last_session.as_ref().map(|item| item.share_id.clone()));
+    let requested_profile = profile_id.or_else(|| {
+        state
+            .signer
+            .lock()
+            .unwrap()
+            .last_session
+            .as_ref()
+            .map(|item| item.share_id.clone())
+    });
     let Some(profile_id) = requested_profile else {
         return Ok(ProfileRuntimeSnapshot {
             active: false,
@@ -270,9 +287,11 @@ pub async fn profile_session_snapshot(
 
     let profile = igloo_shell_core::shell::read_profile(&state.shell_paths, &profile_id).ok();
     let daemon_metadata = read_daemon_metadata(&state.shell_paths, &profile_id).ok();
-    let daemon_log_path = profile
-        .as_ref()
-        .map(|_| profile_log_path(&state.shell_paths, &profile_id).display().to_string());
+    let daemon_log_path = profile.as_ref().map(|_| {
+        profile_log_path(&state.shell_paths, &profile_id)
+            .display()
+            .to_string()
+    });
     let active = {
         let guard = state.signer.lock().unwrap();
         guard
@@ -314,11 +333,9 @@ pub async fn profile_session_snapshot(
         None
     };
     let runtime_diagnostics = match &runtime_status {
-        Some(runtime_status) => Some(
-            serde_json::json!({
-                "runtime_status": runtime_status,
-            }),
-        ),
+        Some(runtime_status) => Some(serde_json::json!({
+            "runtime_status": runtime_status,
+        })),
         None => None,
     };
 
@@ -426,7 +443,11 @@ pub fn maybe_handle_close_request(window: &tauri::Window, state: &AppState) -> R
     Ok(true)
 }
 
-pub fn make_generated_keyset(group_name: String, threshold: u16, count: u16) -> Result<GeneratedKeyset> {
+pub fn make_generated_keyset(
+    group_name: String,
+    threshold: u16,
+    count: u16,
+) -> Result<GeneratedKeyset> {
     let bundle = create_keyset(CreateKeysetConfig {
         group_name,
         threshold,
@@ -446,7 +467,8 @@ pub async fn make_rotated_keyset(
 
     let mut recovered = Vec::new();
     for source in sources {
-        let (_, payload) = preview_bfshare_recovery(&source.package, source.package_password, None).await?;
+        let (_, payload) =
+            preview_bfshare_recovery(&source.package, source.package_password, None).await?;
         recovered.push(payload);
     }
 
@@ -477,7 +499,7 @@ pub async fn make_rotated_keyset(
             count,
         },
     )
-        .map_err(|error| anyhow!("rotate keyset: {error}"))?;
+    .map_err(|error| anyhow!("rotate keyset: {error}"))?;
 
     generated_keyset_response("rotated", rotated.next.group, rotated.next.shares)
 }
@@ -570,7 +592,8 @@ pub fn make_generated_onboarding_package(
     if relay_urls.is_empty() {
         bail!("at least one relay is required");
     }
-    let share = parse_share_package(share_package_json).map_err(|error| anyhow!("parse share package: {error}"))?;
+    let share = parse_share_package(share_package_json)
+        .map_err(|error| anyhow!("parse share package: {error}"))?;
     encode_bfonboard_package(
         &BfOnboardPayload {
             share_secret: hex::encode(share.seckey),
@@ -590,7 +613,10 @@ fn group_from_payload(payload: &frostr_utils::BfProfilePayload) -> Result<GroupP
         .map_err(|e: bifrost_codec::CodecError| anyhow!("invalid group package: {e}"))
 }
 
-fn share_from_payload(group: &GroupPackage, payload: &frostr_utils::BfProfilePayload) -> Result<SharePackage> {
+fn share_from_payload(
+    group: &GroupPackage,
+    payload: &frostr_utils::BfProfilePayload,
+) -> Result<SharePackage> {
     let share_secret = hex::decode(&payload.device.share_secret)?;
     let seckey: [u8; 32] = share_secret
         .try_into()
@@ -677,5 +703,4 @@ mod tests {
             ]
         );
     }
-
 }

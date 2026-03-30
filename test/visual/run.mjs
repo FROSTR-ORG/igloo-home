@@ -74,7 +74,16 @@ process.on('exit', () => {
   } catch {}
 });
 
-const scenarios = ['landing', 'create', 'load', 'inventory', 'dashboard-signer', 'dashboard-settings'];
+const scenarios = [
+  'landing',
+  'landing-seeded',
+  'create',
+  'load',
+  'onboard-connect',
+  'onboard-save',
+  'dashboard-signer',
+  'dashboard-settings',
+];
 
 async function captureScenario(name) {
   const outputPath = path.join(artifactDir, `${name}.png`);

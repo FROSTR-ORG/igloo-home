@@ -8,10 +8,11 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::models::{
-    ApplyRotationUpdateInput, CreateGeneratedOnboardingPackageInput, CreateKeysetRequest,
-    ExportProfileInput, ExportProfilePackageInput, ImportProfileFromOnboardingInput,
-    ImportProfileFromRawInput, ListSessionLogsInput, PublishProfileBackupInput, RemoveProfileInput,
-    RotateKeysetRequest, StartProfileSessionRequest,
+    ApplyRotationUpdateInput, ConnectOnboardingPackageInput, CreateGeneratedOnboardingPackageInput,
+    CreateKeysetRequest, ExportProfileInput, ExportProfilePackageInput,
+    FinalizeConnectedOnboardingInput, ImportProfileFromOnboardingInput, ImportProfileFromRawInput,
+    ListSessionLogsInput, PublishProfileBackupInput, RemoveProfileInput, RotateKeysetRequest,
+    StartProfileSessionRequest,
 };
 use crate::{profiles, session, session_log};
 
@@ -82,7 +83,8 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
         "health" => Ok(serde_json::json!({ "ready": true })),
         "app_paths" => {
             let state = app.state::<session::AppState>();
-            serde_json::to_value(profiles::shell_paths_response(&state.shell_paths)).map_err(Into::into)
+            serde_json::to_value(profiles::shell_paths_response(&state.shell_paths))
+                .map_err(Into::into)
         }
         "list_profiles" => {
             let state = app.state::<session::AppState>();
@@ -116,9 +118,36 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
             ))?;
             Ok(serde_json::to_value(result)?)
         })(),
+        "connect_onboarding_package" => (|| -> anyhow::Result<Value> {
+            let state = app.state::<session::AppState>();
+            let input: ConnectOnboardingPackageInput = serde_json::from_value(request.input)?;
+            let result = tauri::async_runtime::block_on(profiles::connect_onboarding_package(
+                state.inner(),
+                input.onboarding_password,
+                &input.package,
+            ))?;
+            Ok(serde_json::to_value(result)?)
+        })(),
+        "finalize_connected_onboarding" => (|| -> anyhow::Result<Value> {
+            let state = app.state::<session::AppState>();
+            let input: FinalizeConnectedOnboardingInput = serde_json::from_value(request.input)?;
+            let result = profiles::finalize_connected_onboarding(
+                state.inner(),
+                input.label,
+                input.relay_profile,
+                input.vault_passphrase,
+            )?;
+            Ok(serde_json::to_value(result)?)
+        })(),
+        "discard_connected_onboarding" => {
+            let state = app.state::<session::AppState>();
+            serde_json::to_value(profiles::discard_connected_onboarding(state.inner()))
+                .map_err(Into::into)
+        }
         "create_generated_keyset" => (|| -> anyhow::Result<Value> {
             let input: CreateKeysetRequest = serde_json::from_value(request.input)?;
-            let result = session::make_generated_keyset(input.group_name, input.threshold, input.count)?;
+            let result =
+                session::make_generated_keyset(input.group_name, input.threshold, input.count)?;
             Ok(serde_json::to_value(result)?)
         })(),
         "create_rotated_keyset" => (|| -> anyhow::Result<Value> {
@@ -131,7 +160,8 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
             Ok(serde_json::to_value(result)?)
         })(),
         "create_generated_onboarding_package" => (|| -> anyhow::Result<Value> {
-            let input: CreateGeneratedOnboardingPackageInput = serde_json::from_value(request.input)?;
+            let input: CreateGeneratedOnboardingPackageInput =
+                serde_json::from_value(request.input)?;
             let result = session::make_generated_onboarding_package(
                 &input.share_package_json,
                 input.relay_urls,
@@ -155,7 +185,7 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
                 std::path::PathBuf::from(input.destination_dir).as_path(),
                 Some(input.vault_passphrase),
             )
-                .and_then(|value| serde_json::to_value(value).map_err(Into::into))
+            .and_then(|value| serde_json::to_value(value).map_err(Into::into))
         })(),
         "export_profile_package" => (|| -> anyhow::Result<Value> {
             let state = app.state::<session::AppState>();
@@ -187,7 +217,7 @@ fn execute_request(app: &AppHandle, request: TestRequest) -> TestResponse {
                 state.inner(),
                 input,
             ))
-                .and_then(|value| serde_json::to_value(value).map_err(Into::into))
+            .and_then(|value| serde_json::to_value(value).map_err(Into::into))
         })(),
         "profile_runtime_snapshot" => {
             let state = app.state::<session::AppState>();

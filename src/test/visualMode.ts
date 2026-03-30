@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  ConnectedOnboardingPreview,
   GeneratedKeyset,
   ProfileManifest,
   ProfileRuntimeSnapshot,
@@ -7,16 +8,17 @@ import type {
 
 export type VisualScenarioName =
   | 'landing'
+  | 'landing-seeded'
   | 'create'
   | 'load'
-  | 'onboard'
-  | 'inventory'
+  | 'onboard-connect'
+  | 'onboard-save'
   | 'dashboard-signer'
   | 'dashboard-permissions'
   | 'dashboard-settings';
 
 type VisualScenarioState = {
-  activeView: 'landing' | 'create' | 'load' | 'onboard' | 'inventory' | 'dashboard';
+  activeView: 'landing' | 'create' | 'load' | 'onboard-connect' | 'onboard-save' | 'dashboard';
   activeDashboardTab: 'signer' | 'permissions' | 'settings';
   settings: AppSettings;
   profiles: ProfileManifest[];
@@ -47,12 +49,16 @@ type VisualScenarioState = {
     groupPackageJson: string;
     sharePackageJson: string;
   };
-  onboardingForm: {
+  onboardConnectForm: {
     packageText: string;
     password: string;
-    vaultPassphrase: string;
-    label: string;
   };
+  onboardSaveForm: {
+    label: string;
+    vaultPassphrase: string;
+    confirmPassphrase: string;
+  };
+  pendingOnboardConnection: ConnectedOnboardingPreview | null;
   rotationForm?: {
     onboardingPackage: string;
     onboardingPassword: string;
@@ -161,7 +167,7 @@ const sampleRuntimeSnapshot: ProfileRuntimeSnapshot = {
 };
 
 const baseState: VisualScenarioState = {
-  activeView: 'inventory',
+  activeView: 'landing',
   activeDashboardTab: 'signer',
   settings: {
     close_to_tray: true,
@@ -193,11 +199,27 @@ const baseState: VisualScenarioState = {
     groupPackageJson: '{\n  "group": "demo"\n}',
     sharePackageJson: '{\n  "share": "demo"\n}',
   },
-  onboardingForm: {
+  onboardConnectForm: {
     packageText: 'bfonboard1visualpreviewpackage',
     password: 'preview-password',
-    vaultPassphrase: 'visual-preview-pass',
+  },
+  onboardSaveForm: {
     label: 'Preview Onboard',
+    vaultPassphrase: 'visual-preview-pass',
+    confirmPassphrase: 'visual-preview-pass',
+  },
+  pendingOnboardConnection: {
+    preview: {
+      profile_id: 'preview-onboarded-profile',
+      label: 'Preview Onboard',
+      share_public_key: '44'.repeat(32),
+      group_public_key: '55'.repeat(32),
+      threshold: 2,
+      total_count: 3,
+      relays: ['wss://relay.primal.net', 'wss://relay.damus.io'],
+      peer_pubkey: '66'.repeat(32),
+      source: 'bfonboard',
+    },
   },
   loadMode: 'bfprofile',
   loadForm: {
@@ -225,12 +247,14 @@ export function resolveVisualScenario(): VisualScenarioState | null {
   switch (name) {
     case 'landing':
       return { ...baseState, activeView: 'landing', profiles: [], selectedProfileId: '' };
+    case 'landing-seeded':
+      return { ...baseState, activeView: 'landing' };
     case 'load':
       return { ...baseState, activeView: 'load', loadMode: 'bfprofile' };
-    case 'onboard':
-      return { ...baseState, activeView: 'onboard' };
-    case 'inventory':
-      return { ...baseState, activeView: 'inventory' };
+    case 'onboard-connect':
+      return { ...baseState, activeView: 'onboard-connect', pendingOnboardConnection: null };
+    case 'onboard-save':
+      return { ...baseState, activeView: 'onboard-save' };
     case 'create':
       return { ...baseState, activeView: 'create', generatedKeyset: sampleGeneratedKeyset };
     case 'dashboard-signer':

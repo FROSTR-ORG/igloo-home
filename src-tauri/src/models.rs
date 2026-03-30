@@ -1,6 +1,6 @@
 use bifrost_app::runtime::AppOptions;
 use bifrost_signer::DeviceStatus;
-use igloo_shell_core::shell::{DaemonMetadata, ProfileManifest};
+use igloo_shell_core::shell::{DaemonMetadata, ProfileManifest, ProfilePreview};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +67,24 @@ pub struct ImportProfileFromOnboardingInput {
     pub vault_passphrase: String,
     pub onboarding_password: String,
     pub package: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectOnboardingPackageInput {
+    pub onboarding_password: String,
+    pub package: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinalizeConnectedOnboardingInput {
+    pub label: Option<String>,
+    pub relay_profile: Option<String>,
+    pub vault_passphrase: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscardConnectedOnboardingResult {
+    pub discarded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,4 +267,38 @@ pub struct AppSettingsEvent {
 pub struct CloseRequestEvent {
     pub share_id: Option<String>,
     pub share_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnboardingPreview {
+    pub profile_id: String,
+    pub label: String,
+    pub share_public_key: String,
+    pub group_public_key: String,
+    pub threshold: usize,
+    pub total_count: usize,
+    pub relays: Vec<String>,
+    pub peer_pubkey: Option<String>,
+    pub source: String,
+}
+
+impl From<ProfilePreview> for OnboardingPreview {
+    fn from(value: ProfilePreview) -> Self {
+        Self {
+            profile_id: value.profile_id,
+            label: value.label,
+            share_public_key: value.share_public_key,
+            group_public_key: value.group_public_key,
+            threshold: value.threshold,
+            total_count: value.total_count,
+            relays: value.relays,
+            peer_pubkey: value.peer_pubkey,
+            source: value.source.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectedOnboardingPreview {
+    pub preview: OnboardingPreview,
 }

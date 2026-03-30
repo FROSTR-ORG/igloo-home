@@ -5,12 +5,17 @@ use anyhow::{Context, Result, bail};
 use bifrost_app::runtime::AppOptions;
 use igloo_shell_core::shell::{
     ProfileBackupPublishResult, ProfileExportResult, ProfileImportResult, ProfileManifest,
-    ProfilePackageExportResult, RelayProfile, ShellPaths, export_profile, export_profile_as_bfprofile,
-    export_profile_as_bfshare, import_profile_from_bfprofile_value, import_profile_from_files,
-    import_profile_from_onboarding_value, list_profiles, load_relay_profiles, load_shell_config,
-    publish_profile_backup, read_profile, recover_profile_from_bfshare_value, remove_profile,
-    replace_relay_profile, set_default_relay_profile, write_profile,
+    ProfilePackageExportResult, RelayProfile, ShellPaths, connect_onboarding_package_preview,
+    export_profile, export_profile_as_bfprofile, export_profile_as_bfshare,
+    finalize_connected_onboarding_import, import_profile_from_bfprofile_value,
+    import_profile_from_files, import_profile_from_onboarding_value, list_profiles,
+    load_relay_profiles, load_shell_config, publish_profile_backup, read_profile,
+    recover_profile_from_bfshare_value, remove_profile, replace_relay_profile,
+    set_default_relay_profile, write_profile,
 };
+
+use crate::models::{ConnectedOnboardingPreview, DiscardConnectedOnboardingResult};
+use crate::session::{AppState, PendingOnboardingState};
 
 pub fn list_managed_profiles(paths: &ShellPaths) -> Result<Vec<ProfileManifest>> {
     paths.ensure()?;
@@ -32,7 +37,8 @@ pub fn import_profile_from_raw_json(
     share_package_json: &str,
 ) -> Result<ProfileImportResult> {
     paths.ensure()?;
-    let relay_profile = resolve_or_create_relay_profile(paths, relay_profile, label.as_deref(), relay_urls)?;
+    let relay_profile =
+        resolve_or_create_relay_profile(paths, relay_profile, label.as_deref(), relay_urls)?;
     let temp_root = paths.imports_dir.join(format!(
         "raw-import-{}",
         std::time::SystemTime::now()
@@ -79,6 +85,51 @@ pub async fn import_profile_from_onboarding(
         onboarding_password,
     )
     .await
+}
+
+pub async fn connect_onboarding_package(
+    state: &AppState,
+    onboarding_password: String,
+    package_raw: &str,
+) -> Result<ConnectedOnboardingPreview> {
+    state.shell_paths.ensure()?;
+    let connected = connect_onboarding_package_preview(
+        package_raw.trim(),
+        onboarding_password.trim().to_string(),
+    )
+    .await?;
+    let preview = ConnectedOnboardingPreview {
+        preview: connected.preview.clone().into(),
+    };
+    *state.pending_onboarding.lock().unwrap() = Some(PendingOnboardingState { connected });
+    Ok(preview)
+}
+
+pub fn finalize_connected_onboarding(
+    state: &AppState,
+    label: Option<String>,
+    relay_profile: Option<String>,
+    vault_passphrase: String,
+) -> Result<ProfileImportResult> {
+    state.shell_paths.ensure()?;
+    let pending = state
+        .pending_onboarding
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("connect an onboarding package first"))?;
+    finalize_connected_onboarding_import(
+        &state.shell_paths,
+        pending.connected,
+        label,
+        relay_profile,
+        Some(vault_passphrase),
+    )
+}
+
+pub fn discard_connected_onboarding(state: &AppState) -> DiscardConnectedOnboardingResult {
+    let discarded = state.pending_onboarding.lock().unwrap().take().is_some();
+    DiscardConnectedOnboardingResult { discarded }
 }
 
 pub fn import_profile_from_bfprofile(
@@ -139,14 +190,12 @@ pub fn export_managed_profile_package(
 ) -> Result<ProfilePackageExportResult> {
     paths.ensure()?;
     match format {
-        "bfprofile" => export_profile_as_bfprofile(
-            paths,
-            profile_id,
-            package_password,
-            vault_passphrase,
-            None,
-        ),
-        "bfshare" => export_profile_as_bfshare(paths, profile_id, package_password, vault_passphrase, None),
+        "bfprofile" => {
+            export_profile_as_bfprofile(paths, profile_id, package_password, vault_passphrase, None)
+        }
+        "bfshare" => {
+            export_profile_as_bfshare(paths, profile_id, package_password, vault_passphrase, None)
+        }
         _ => bail!("unsupported export format {format}; expected bfprofile or bfshare"),
     }
 }
@@ -174,12 +223,14 @@ pub fn update_managed_profile_settings(
 ) -> Result<ProfileManifest> {
     paths.ensure()?;
     let mut profile = read_profile(paths, profile_id)?;
-    let mut relay_profile = igloo_shell_core::shell::read_relay_profile(paths, &profile.relay_profile)?;
+    let mut relay_profile =
+        igloo_shell_core::shell::read_relay_profile(paths, &profile.relay_profile)?;
     relay_profile.label = label.clone();
     relay_profile.relays = relays;
     replace_relay_profile(paths, relay_profile)?;
     profile.label = label;
-    profile.runtime_options = serde_json::to_value(runtime_options).context("serialize runtime options")?;
+    profile.runtime_options =
+        serde_json::to_value(runtime_options).context("serialize runtime options")?;
     write_profile(paths, &profile)?;
     Ok(profile)
 }
@@ -235,7 +286,11 @@ fn resolve_or_create_relay_profile(
         label
             .unwrap_or("desktop")
             .chars()
-            .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+            .map(|ch| if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            })
             .collect::<String>()
             .trim_matches('-')
             .to_string()
@@ -270,4 +325,190 @@ fn now_unix_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use bifrost_app::onboarding::{BootstrapImportResult, BootstrapStateSnapshot};
+    use bifrost_core::types::DerivedPublicNonce;
+    use bifrost_signer::DeviceState;
+    use frostr_utils::{CreateKeysetConfig, create_keyset};
+    use igloo_shell_core::shell::{ConnectedOnboardingImport, ProfileImportResult, ProfilePreview};
+
+    use super::*;
+    use crate::paths::AppPaths;
+    use crate::session::{PendingOnboardingState, make_app_state};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+    fn test_shell_paths(label: &str) -> ShellPaths {
+        let root = std::env::temp_dir().join(format!(
+            "igloo-home-profiles-test-{label}-{}",
+            TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        ShellPaths {
+            config_dir: root.join("config").join("igloo-shell"),
+            data_dir: root.join("data").join("igloo-shell"),
+            state_dir: root.join("state").join("igloo-shell"),
+            profiles_dir: root.join("config").join("igloo-shell").join("profiles"),
+            groups_dir: root.join("data").join("igloo-shell").join("groups"),
+            vault_dir: root.join("data").join("igloo-shell").join("vault"),
+            state_profiles_dir: root.join("state").join("igloo-shell").join("profiles"),
+            rotations_dir: root.join("state").join("igloo-shell").join("rotations"),
+            config_path: root.join("config").join("igloo-shell").join("config.json"),
+            relay_profiles_path: root
+                .join("config")
+                .join("igloo-shell")
+                .join("relay-profiles.json"),
+            imports_dir: root.join("data").join("igloo-shell").join("imports"),
+        }
+    }
+
+    fn test_app_paths(label: &str) -> AppPaths {
+        let root = std::env::temp_dir().join(format!(
+            "igloo-home-app-test-{label}-{}",
+            TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create app path root");
+        AppPaths {
+            settings_path: root.join("settings.json"),
+            last_session_path: root.join("last-session.json"),
+        }
+    }
+
+    fn sample_connected_onboarding() -> ConnectedOnboardingImport {
+        let bundle = create_keyset(CreateKeysetConfig {
+            group_name: "Desktop Test Group".to_string(),
+            threshold: 2,
+            count: 3,
+        })
+        .expect("create keyset");
+        let group = bundle.group.clone();
+        let share = bundle
+            .shares
+            .iter()
+            .find(|share| share.idx == 2)
+            .cloned()
+            .expect("share");
+        let inviter = group
+            .members
+            .iter()
+            .find(|member| member.idx == 1)
+            .expect("inviter");
+        let onboarding_nonce = DerivedPublicNonce {
+            binder_pn: [4u8; 33],
+            hidden_pn: [5u8; 33],
+            code: [6u8; 32],
+        };
+        let mut onboarding_state = DeviceState::new(share.idx, share.seckey);
+        onboarding_state
+            .nonce_pool
+            .store_incoming(1, vec![onboarding_nonce.clone()]);
+        onboarding_state
+            .nonce_pool
+            .generate_for_peer(1, 4)
+            .expect("bootstrap outgoing");
+
+        let completion = BootstrapImportResult {
+            request_id: "req-home-test".to_string(),
+            group_member_count: group.members.len(),
+            group: group.clone(),
+            share: share.clone(),
+            relays: vec!["ws://127.0.0.1:8194".to_string()],
+            peer_pubkey: hex::encode(&inviter.pubkey[1..]),
+            bootstrap_nonces: vec![onboarding_nonce],
+            bootstrap_state: BootstrapStateSnapshot {
+                device_state_hex: {
+                    let encoded =
+                        bincode::serialize(&onboarding_state).expect("serialize device state");
+                    hex::encode(encoded)
+                },
+            },
+        };
+        let preview = ProfilePreview {
+            profile_id: "preview-profile".to_string(),
+            label: "Desktop Pending Device".to_string(),
+            share_public_key: hex::encode(&inviter.pubkey[1..]),
+            group_public_key: hex::encode(group.group_pk),
+            threshold: usize::from(group.threshold),
+            total_count: group.members.len(),
+            relays: vec!["ws://127.0.0.1:8194".to_string()],
+            peer_pubkey: Some(hex::encode(&inviter.pubkey[1..])),
+            source: "bfonboard",
+        };
+        ConnectedOnboardingImport {
+            preview,
+            completion,
+        }
+    }
+
+    #[test]
+    fn discard_and_finalize_pending_onboarding_lifecycle() {
+        let shell_paths = test_shell_paths("pending-lifecycle");
+        shell_paths.ensure().expect("ensure shell paths");
+        replace_relay_profile(
+            &shell_paths,
+            RelayProfile {
+                id: "local".to_string(),
+                label: "Local".to_string(),
+                relays: vec!["ws://127.0.0.1:8194".to_string()],
+            },
+        )
+        .expect("write relay profile");
+        let state = make_app_state(
+            test_app_paths("pending-lifecycle"),
+            shell_paths.clone(),
+            crate::models::AppSettings::default(),
+            None,
+        );
+
+        assert!(!discard_connected_onboarding(&state).discarded);
+        assert!(
+            finalize_connected_onboarding(
+                &state,
+                Some("Desktop Pending Device".to_string()),
+                Some("local".to_string()),
+                "vault-pass".to_string(),
+            )
+            .is_err()
+        );
+
+        *state.pending_onboarding.lock().unwrap() = Some(PendingOnboardingState {
+            connected: sample_connected_onboarding(),
+        });
+        assert!(discard_connected_onboarding(&state).discarded);
+        assert!(state.pending_onboarding.lock().unwrap().is_none());
+
+        *state.pending_onboarding.lock().unwrap() = Some(PendingOnboardingState {
+            connected: sample_connected_onboarding(),
+        });
+        let result = finalize_connected_onboarding(
+            &state,
+            Some("Desktop Pending Device".to_string()),
+            Some("local".to_string()),
+            "vault-pass".to_string(),
+        )
+        .expect("finalize pending onboarding");
+        match result {
+            ProfileImportResult::ProfileCreated { profile, .. } => {
+                assert_eq!(profile.label, "Desktop Pending Device");
+            }
+            other => panic!("expected profile_created, got {other:?}"),
+        }
+        assert!(state.pending_onboarding.lock().unwrap().is_none());
+        assert!(
+            finalize_connected_onboarding(
+                &state,
+                Some("Desktop Pending Device".to_string()),
+                Some("local".to_string()),
+                "vault-pass".to_string(),
+            )
+            .is_err()
+        );
+    }
 }

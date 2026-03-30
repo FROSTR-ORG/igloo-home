@@ -15,5 +15,5 @@
 
 - Run with `npm run test:visual`
 - Uses headless Chromium against the Vite app with deterministic visual preview scenarios
-- Captures landing, create, load, inventory, and dashboard screenshots without requiring Tauri window capture
+- Captures landing, seeded landing, create, load, onboard, and dashboard screenshots without requiring Tauri window capture
 - This is the primary styling-observability path when desktop compositor screenshot capture is unavailable

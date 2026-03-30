@@ -1,6 +1,9 @@
 import {
   appPaths,
+  connectOnboardingPackage,
+  discardConnectedOnboarding,
   exportProfile,
+  finalizeConnectedOnboarding,
   listSessionLogs,
   listProfiles,
   importProfileFromOnboarding,
@@ -18,6 +21,9 @@ declare global {
       listProfiles: typeof listProfiles;
       importProfileFromRaw: typeof importProfileFromRaw;
       importProfileFromOnboarding: typeof importProfileFromOnboarding;
+      connectOnboardingPackage: typeof connectOnboardingPackage;
+      finalizeConnectedOnboarding: typeof finalizeConnectedOnboarding;
+      discardConnectedOnboarding: typeof discardConnectedOnboarding;
       removeProfile: typeof removeProfile;
       exportProfile: typeof exportProfile;
       startProfileSession: typeof startProfileSession;
@@ -34,6 +40,9 @@ export function installTestBridge() {
     listProfiles,
     importProfileFromRaw,
     importProfileFromOnboarding,
+    connectOnboardingPackage,
+    finalizeConnectedOnboarding,
+    discardConnectedOnboarding,
     removeProfile,
     exportProfile,
     startProfileSession,

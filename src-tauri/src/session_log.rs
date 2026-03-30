@@ -18,9 +18,17 @@ pub fn read_session_log(runtime_dir: &Path, paths: &AppPaths) -> Result<Vec<Sign
         .collect()
 }
 
-pub fn append_session_log(paths: &AppPaths, runtime_dir: &Path, entry: &SignerLogEntry) -> Result<()> {
+pub fn append_session_log(
+    paths: &AppPaths,
+    runtime_dir: &Path,
+    entry: &SignerLogEntry,
+) -> Result<()> {
     let path = paths.session_log_path(runtime_dir);
-    let mut bytes = if path.exists() { fs::read(&path)? } else { Vec::new() };
+    let mut bytes = if path.exists() {
+        fs::read(&path)?
+    } else {
+        Vec::new()
+    };
     bytes.extend_from_slice(serde_json::to_string(entry)?.as_bytes());
     bytes.push(b'\n');
     fs::write(path, bytes)?;

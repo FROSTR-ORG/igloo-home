@@ -12,12 +12,14 @@ const fixtureRoot = process.env.FROSTR_TEST_HARNESS_DIR
 const fixtureDir = path.join(fixtureRoot, 'demo-2of3');
 
 if (!process.env.IGLOO_HOME_RUN_DESKTOP_TESTS) {
-  console.log('igloo-home desktop tests skipped (set IGLOO_HOME_RUN_DESKTOP_TESTS=1 to enable)');
+  console.log(
+    'igloo-home desktop tests skipped (set IGLOO_HOME_RUN_DESKTOP_TESTS=1 for live desktop smoke, or use npm run test:desktop:xvfb)',
+  );
   process.exit(0);
 }
 
 if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
-  console.error('desktop smoke requires DISPLAY or WAYLAND_DISPLAY');
+  console.error('desktop smoke requires DISPLAY or WAYLAND_DISPLAY (or run npm run test:desktop:xvfb)');
   process.exit(1);
 }
 
@@ -43,6 +45,7 @@ const devServer = spawn('npm', ['run', 'dev'], {
   env: {
     ...process.env,
     IGLOO_HOME_TEST_MODE: '1',
+    IGLOO_HOME_TEST_SHOW_WINDOW: '1',
     IGLOO_HOME_TEST_PORT: String(testPort),
     IGLOO_HOME_TEST_ROOT: rootDir,
     IGLOO_HOME_TEST_APP_DATA_DIR: path.join(rootDir, 'app-data'),
@@ -73,6 +76,7 @@ function startAppProcess() {
       env: {
         ...process.env,
         IGLOO_HOME_TEST_MODE: '1',
+        IGLOO_HOME_TEST_SHOW_WINDOW: '1',
         IGLOO_HOME_TEST_PORT: String(testPort),
         IGLOO_HOME_TEST_ROOT: rootDir,
         IGLOO_HOME_TEST_APP_DATA_DIR: path.join(rootDir, 'app-data'),
@@ -254,7 +258,7 @@ try {
     label: 'Desktop Smoke Bob',
     relay_profile: null,
     relay_urls: ['ws://127.0.0.1:8194'],
-    vault_passphrase: 'desktop-smoke-pass',
+    passphrase: 'desktop-smoke-pass',
     group_package_json: groupPackageJson,
     share_package_json: sharePackageJson,
   });
@@ -262,13 +266,6 @@ try {
   if (importResult?.status !== 'profile_created' || !importResult.profile?.id) {
     throw new Error(`unexpected import result: ${JSON.stringify(importResult)}`);
   }
-
-  await sendRequest('navigate_view', {
-    view: 'landing',
-    profile_id: importResult.profile.id,
-  });
-  await sleep(1200);
-  const seededLandingShot = await captureWindow(windowId, 'landing-seeded');
 
   await sendRequest('navigate_view', {
     view: 'dashboard',
@@ -280,7 +277,7 @@ try {
 
   console.log(`igloo-home desktop smoke passed`);
   console.log(`artifacts: ${artifactDir}`);
-  console.log(`screenshots: ${landingShot}, ${seededLandingShot}, ${signerShot}`);
+  console.log(`screenshots: ${landingShot}, ${signerShot}`);
 } catch (error) {
   console.error(`igloo-home desktop smoke failed: ${error instanceof Error ? error.message : String(error)}`);
   console.error(`artifacts: ${artifactDir}`);

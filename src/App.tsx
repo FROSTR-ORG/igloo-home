@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { confirm, open } from '@tauri-apps/plugin-dialog';
+import { confirm } from '@tauri-apps/plugin-dialog';
 import { shortProfileId } from '@/lib/profileIdentity';
 import {
   AppHeader,
@@ -31,7 +31,6 @@ import {
   createGeneratedKeyset,
   createRotatedKeyset,
   discardConnectedOnboarding,
-  exportProfile,
   exportProfilePackage,
   finalizeConnectedOnboarding,
   getSettings,
@@ -40,7 +39,6 @@ import {
   listProfiles,
   listRelayProfiles,
   profileRuntimeSnapshot,
-  publishProfileBackup,
   recoverProfileFromBfshare,
   removeProfile,
   resolveCloseRequest,
@@ -82,7 +80,7 @@ type DashboardTab = 'signer' | 'permissions' | 'settings';
 
 type SaveDraft = {
   label: string;
-  vaultPassphrase: string;
+  passphrase: string;
   relayUrls: string;
 };
 
@@ -115,7 +113,7 @@ type OnboardConnectDraft = {
 
 type OnboardSaveDraft = {
   label: string;
-  vaultPassphrase: string;
+  passphrase: string;
   confirmPassphrase: string;
 };
 
@@ -441,7 +439,8 @@ export default function App() {
   const [profiles, setProfiles] = useState<ProfileManifest[]>(visualScenario?.profiles ?? []);
   const [relayProfiles, setRelayProfiles] = useState<RelayProfile[]>(visualScenario?.relayProfiles ?? []);
   const [selectedProfileId, setSelectedProfileId] = useState(visualScenario?.selectedProfileId ?? '');
-  const [vaultPassphrase, setVaultPassphrase] = useState(visualScenario?.vaultPassphrase ?? '');
+  const [passphrase, setPassphrase] = useState(visualScenario?.passphrase ?? '');
+  const [landingPassphrases, setLandingPassphrases] = useState<Record<string, string>>({});
   const [generatedKeyset, setGeneratedKeyset] = useState<GeneratedKeyset | null>(visualScenario?.generatedKeyset ?? null);
   const [createForm, setCreateForm] = useState(
     {
@@ -464,7 +463,7 @@ export default function App() {
   const [importForm, setImportForm] = useState(
     visualScenario?.importForm ?? {
       label: '',
-      vaultPassphrase: '',
+      passphrase: '',
       relayUrls: '',
       groupPackageJson: '',
       sharePackageJson: '',
@@ -479,7 +478,7 @@ export default function App() {
   const [onboardSaveForm, setOnboardSaveForm] = useState<OnboardSaveDraft>(
     visualScenario?.onboardSaveForm ?? {
       label: '',
-      vaultPassphrase: '',
+      passphrase: '',
       confirmPassphrase: '',
     },
   );
@@ -496,7 +495,7 @@ export default function App() {
   const [loadForm, setLoadForm] = useState(
     visualScenario?.loadForm ?? {
       label: '',
-      vaultPassphrase: '',
+      passphrase: '',
       packagePassword: '',
       packageText: '',
     },
@@ -714,7 +713,7 @@ export default function App() {
           share.member_idx,
           {
             label: createForm.mode === 'rotate' && sourceProfile ? sourceProfile.label : share.name,
-            vaultPassphrase: '',
+            passphrase: '',
             relayUrls: sourceRelayProfile?.relays.join('\n') ?? '',
           },
         ]),
@@ -739,20 +738,20 @@ export default function App() {
 
   async function handleSaveGeneratedProfile(share: GeneratedKeysetShare) {
     const draft = saveForms[share.member_idx];
-    if (!draft?.label || !draft.vaultPassphrase) {
-      throw new Error('profile label and vault passphrase are required');
+    if (!draft?.label || !draft.passphrase) {
+      throw new Error('profile label and passphrase are required');
     }
     const result = await run('importing generated profile', () =>
       importProfileFromRaw({
         label: draft.label,
         relayUrls: splitTextarea(draft.relayUrls),
-        vaultPassphrase: draft.vaultPassphrase,
+        passphrase: draft.passphrase,
         groupPackageJson: generatedKeyset?.group_package_json ?? '',
         sharePackageJson: share.share_package_json,
       }),
     );
     const profile = unwrapImportedProfile(result);
-    setVaultPassphrase(draft.vaultPassphrase);
+    setPassphrase(draft.passphrase);
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
     setSelectedGeneratedShareIdx(share.member_idx);
@@ -829,17 +828,17 @@ export default function App() {
     if (!pendingOnboardConnection) {
       throw new Error('connect an onboarding package first');
     }
-    if (onboardSaveForm.vaultPassphrase !== onboardSaveForm.confirmPassphrase) {
-      throw new Error('vault passphrase confirmation does not match');
+    if (onboardSaveForm.passphrase !== onboardSaveForm.confirmPassphrase) {
+      throw new Error('passphrase confirmation does not match');
     }
     const result = await run('saving onboarded device', () =>
       finalizeConnectedOnboarding({
         label: onboardSaveForm.label || undefined,
-        vaultPassphrase: onboardSaveForm.vaultPassphrase,
+        passphrase: onboardSaveForm.passphrase,
       }),
     );
     const profile = unwrapImportedProfile(result);
-    setVaultPassphrase(onboardSaveForm.vaultPassphrase);
+    setPassphrase(onboardSaveForm.passphrase);
     setPendingOnboardConnection(null);
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
@@ -862,19 +861,19 @@ export default function App() {
         loadMode === 'bfprofile'
           ? importProfileFromBfprofile({
               label: loadForm.label || undefined,
-              vaultPassphrase: loadForm.vaultPassphrase,
+              passphrase: loadForm.passphrase,
               packagePassword: loadForm.packagePassword,
               packageText: loadForm.packageText,
             })
           : recoverProfileFromBfshare({
               label: loadForm.label || undefined,
-              vaultPassphrase: loadForm.vaultPassphrase,
+              passphrase: loadForm.passphrase,
               packagePassword: loadForm.packagePassword,
               packageText: loadForm.packageText,
             }),
     );
     const profile = unwrapImportedProfile(result);
-    setVaultPassphrase(loadForm.vaultPassphrase);
+    setPassphrase(loadForm.passphrase);
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
     setActiveView('dashboard');
@@ -888,7 +887,7 @@ export default function App() {
     const result = await run('rotating device key', () =>
       applyRotationUpdate({
         targetProfileId: selectedProfileId,
-        vaultPassphrase,
+        passphrase,
         onboardingPassword: rotationForm.onboardingPassword,
         onboardingPackage: rotationForm.onboardingPackage,
       }),
@@ -905,12 +904,12 @@ export default function App() {
     }
   }
 
-  async function handleStartProfileSession(profileId = selectedProfileId) {
+  async function handleStartProfileSession(profileId = selectedProfileId, sessionPassphrase = passphrase) {
     if (!profileId) {
       throw new Error('select a profile first');
     }
-    if (!vaultPassphrase.trim()) {
-      throw new Error('vault passphrase is required');
+    if (!sessionPassphrase.trim()) {
+      throw new Error('passphrase is required');
     }
     if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id !== profileId) {
       await stopSigner();
@@ -918,7 +917,7 @@ export default function App() {
     const snapshot = await run('starting managed profile', () =>
       startProfileSession({
         profileId,
-        vaultPassphrase,
+        passphrase: sessionPassphrase,
       }),
     );
     setRuntimeSnapshot(snapshot);
@@ -926,14 +925,16 @@ export default function App() {
     setActiveDashboardTab('signer');
   }
 
-  async function handleLandingProfileAction(profileId: string) {
+  async function handleLoadLandingProfile(profileId: string) {
     setSelectedProfileId(profileId);
     if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id === profileId) {
       setActiveView('dashboard');
       setActiveDashboardTab('signer');
       return;
     }
-    await handleStartProfileSession(profileId);
+    const sessionPassphrase = landingPassphrases[profileId] ?? passphrase;
+    setPassphrase(sessionPassphrase);
+    await handleStartProfileSession(profileId, sessionPassphrase);
   }
 
   async function handleStopProfileSession() {
@@ -965,21 +966,6 @@ export default function App() {
     });
   }
 
-  async function handleExportRawProfile(profileId: string) {
-    const destinationDir = await open({ directory: true, multiple: false });
-    if (!destinationDir || Array.isArray(destinationDir)) {
-      return;
-    }
-    await run('exporting managed profile', () =>
-      exportProfile({
-        profileId,
-        destinationDir,
-        vaultPassphrase,
-      }),
-    );
-    setNotice('Raw profile export completed.');
-  }
-
   async function handleCopyProfilePackage(format: 'bfprofile' | 'bfshare') {
     if (!selectedProfileId) {
       throw new Error('select a profile first');
@@ -992,24 +978,11 @@ export default function App() {
         profileId: selectedProfileId,
         format,
         packagePassword: packageDraft.packagePassword,
-        vaultPassphrase,
+        passphrase,
       }),
     );
     await navigator.clipboard.writeText(result.package);
-    setNotice(`${format} copied to clipboard.`);
-  }
-
-  async function handlePublishBackup() {
-    if (!selectedProfileId) {
-      throw new Error('select a profile first');
-    }
-    const result = await run('publishing encrypted backup', () =>
-      publishProfileBackup({
-        profileId: selectedProfileId,
-        vaultPassphrase,
-      }),
-    );
-    setNotice(`Backup published to ${result.relays.length} relay(s).`);
+    setNotice(`${format === 'bfprofile' ? 'profile' : 'share'} copied to clipboard.`);
   }
 
   async function handleSaveOperatorSettings() {
@@ -1029,29 +1002,6 @@ export default function App() {
     setNotice('Profile settings saved.');
   }
 
-  async function handleResetWorkspace() {
-    const shouldReset = await confirm(
-      'Delete every managed profile and clear the active runtime? This returns the desktop app to the landing screen.',
-      { title: 'Reset Workspace', kind: 'warning' },
-    );
-    if (!shouldReset) {
-      return;
-    }
-    await run('resetting workspace', async () => {
-      if (runtimeSnapshot?.active) {
-        await stopSigner();
-      }
-      for (const profile of profiles) {
-        await removeProfile(profile.id);
-      }
-      setSelectedProfileId('');
-      setRuntimeSnapshot(null);
-      await refreshProfiles(null);
-      setActiveView('landing');
-      setNotice('Workspace reset.');
-    });
-  }
-
   async function handleToggleSetting(field: keyof AppSettings, checked: boolean) {
     await run('updating desktop settings', async () => {
       const next = await updateSettings({
@@ -1062,8 +1012,22 @@ export default function App() {
     });
   }
 
+  async function handleLogout() {
+    await run('logging out', async () => {
+      if (runtimeSnapshot?.active) {
+        await stopSigner();
+      }
+      setRuntimeSnapshot(null);
+      setSelectedProfileId('');
+      setPassphrase('');
+      setActiveDashboardTab('signer');
+      setActiveView('landing');
+      setNotice('Logged out.');
+    });
+  }
+
   return (
-    <PageLayout>
+    <PageLayout maxWidth="max-w-6xl">
       <AppHeader
         title="Igloo Home"
         centered
@@ -1090,28 +1054,37 @@ export default function App() {
                   activeProfileId === profile.id
                     ? `${shortProfileId(profile.id)} · signer active`
                     : shortProfileId(profile.id),
-                actionLabel: activeProfileId === profile.id ? 'Open Dashboard' : 'Load Profile',
+                statusLabel: activeProfileId === profile.id ? 'Active' : 'Available',
+                loadLabel: activeProfileId === profile.id ? 'Open Dashboard' : 'Load Profile',
               }))}
-              description="Managed desktop profiles remain available while locked. Enter the vault passphrase below before loading one."
-              onAction={(profileId) => void handleLandingProfileAction(profileId)}
-              footer={
-                profiles.length ? (
-                  <div className="igloo-stack">
-                    <label>
-                      Vault passphrase
-                      <input
-                        type="password"
-                        value={vaultPassphrase}
-                        onChange={event => setVaultPassphrase(event.target.value)}
-                        placeholder="Required to unlock a stored desktop profile"
-                      />
-                    </label>
-                    <p className="igloo-message-muted">
-                      Use the shell vault passphrase for the selected desktop profile to unlock and start the signer session.
-                    </p>
-                  </div>
-                ) : null
-              }
+              description="Managed desktop profiles remain available while locked. Enter the passphrase below before loading one."
+              selectedProfileId={selectedProfileId}
+              onSelect={setSelectedProfileId}
+              onLoad={(profileId) => void handleLoadLandingProfile(profileId)}
+              onDelete={(profileId) => void handleRemoveProfile(profileId)}
+              renderProfileDetail={(profile, isSelected) => (
+                <div className="igloo-stack">
+                  <label>
+                    Passphrase
+                    <input
+                      type="password"
+                      value={landingPassphrases[profile.id] ?? (isSelected ? passphrase : '')}
+                      onFocus={() => setSelectedProfileId(profile.id)}
+                      onChange={event => {
+                        const value = event.target.value;
+                        setLandingPassphrases((current) => ({ ...current, [profile.id]: value }));
+                        if (isSelected) {
+                          setPassphrase(value);
+                        }
+                      }}
+                      placeholder="Required to unlock this desktop profile"
+                    />
+                  </label>
+                  <p className="igloo-message-muted">
+                    Use the shell passphrase for this desktop profile to unlock and start the signer session.
+                  </p>
+                </div>
+              )}
             />
             <div className="igloo-pwa-entry-grid">
               <HostEntryTile
@@ -1147,7 +1120,7 @@ export default function App() {
       {activeView === 'create' ? (
         <HostFlowShell
           title="Create / Rotate Keyset"
-          description="Step through the same host workflow as the PWA, then save one managed desktop profile into the shell-managed vault."
+          description="Step through the same host workflow as the PWA, then save one managed desktop profile into the encrypted profile store."
           onBack={() => setActiveView('landing')}
           backTooltip="Back"
         >
@@ -1234,7 +1207,7 @@ export default function App() {
             <StepProgress steps={['Import or recover', 'Load device']} active={0} />
             <section className="igloo-task-banner">
               <span className="igloo-task-kicker">Load a desktop device</span>
-              <p>Import a protected `bfprofile` or recover from a protected `bfshare`, then save the resulting desktop profile into the local shell vault.</p>
+              <p>Import a protected `bfprofile` or recover from a protected `bfshare`, then save the resulting desktop profile into the local encrypted profile store.</p>
             </section>
             <div className="igloo-button-row">
               <Button
@@ -1263,11 +1236,11 @@ export default function App() {
               />
             </label>
             <label>
-              Vault passphrase
+              Passphrase
               <input
                 type="password"
-                value={loadForm.vaultPassphrase}
-                onChange={event => setLoadForm(current => ({ ...current, vaultPassphrase: event.target.value }))}
+                value={loadForm.passphrase}
+                onChange={event => setLoadForm(current => ({ ...current, passphrase: event.target.value }))}
                 placeholder="Used for local managed storage"
               />
             </label>
@@ -1364,17 +1337,17 @@ export default function App() {
               />
             </label>
             <label>
-              Vault passphrase
+              Passphrase
               <input
                 type="password"
-                value={onboardSaveForm.vaultPassphrase}
+                value={onboardSaveForm.passphrase}
                 onChange={event =>
-                  setOnboardSaveForm(current => ({ ...current, vaultPassphrase: event.target.value }))
+                  setOnboardSaveForm(current => ({ ...current, passphrase: event.target.value }))
                 }
               />
             </label>
             <label>
-              Confirm vault passphrase
+              Confirm passphrase
               <input
                 type="password"
                 value={onboardSaveForm.confirmPassphrase}
@@ -1503,41 +1476,30 @@ export default function App() {
                 setSettingsDraft(current => ({ ...current, peer_selection_strategy: value }))
               }
               onSave={() => void handleSaveOperatorSettings()}
-              maintenanceDescription="Desktop operator actions for package export, backup publication, and full workspace reset."
+              maintenanceDescription="Desktop package export, share rotation, and session controls."
               maintenanceActions={[
                 {
-                  label: 'Copy bfprofile',
+                  label: 'copy profile',
                   onClick: () => void handleCopyProfilePackage('bfprofile'),
                   variant: 'secondary',
                   disabled: !selectedProfileId,
                 },
                 {
-                  label: 'Copy bfshare',
+                  label: 'copy share',
                   onClick: () => void handleCopyProfilePackage('bfshare'),
                   variant: 'secondary',
                   disabled: !selectedProfileId,
                 },
                 {
-                  label: 'Publish Backup',
-                  onClick: () => void handlePublishBackup(),
-                  variant: 'secondary',
+                  label: 'logout',
+                  onClick: () => void handleLogout(),
+                  variant: 'outline',
                   disabled: !selectedProfileId,
-                },
-                {
-                  label: 'Delete Profile',
-                  onClick: () => selectedProfileId && void handleRemoveProfile(selectedProfileId),
-                  variant: 'destructive',
-                  disabled: !selectedProfileId,
-                },
-                {
-                  label: 'Reset Workspace',
-                  onClick: () => void handleResetWorkspace(),
-                  variant: 'destructive',
                 },
               ]}
               extraSections={
                 <>
-                  <ContentCard title="Package Export Password" description="Used to protect copied bfprofile and bfshare packages.">
+                  <ContentCard title="Export Password" description="Used to protect copied profile and share packages.">
                     <label>
                       Package password
                       <input
@@ -1550,7 +1512,7 @@ export default function App() {
                     </label>
                   </ContentCard>
                   <ContentCard
-                    title="Rotate Key"
+                    title="rotate share"
                     description="Paste a rotated bfonboard package to replace the current device share in place while keeping this desktop profile context."
                   >
                     <div className="igloo-stack">
@@ -1583,7 +1545,7 @@ export default function App() {
                       </label>
                       <div className="igloo-button-row">
                         <Button type="button" size="sm" variant="secondary" onClick={() => void handleRotateKey()} disabled={!selectedProfileId}>
-                          Rotate Key
+                          rotate share
                         </Button>
                       </div>
                     </div>

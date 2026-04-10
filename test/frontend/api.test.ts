@@ -17,7 +17,7 @@ describe('igloo-home api import error normalization', async () => {
 
     await expect(
       importProfileFromOnboarding({
-        vaultPassphrase: 'vault-pass',
+        passphrase: 'encrypted-profile-pass',
         onboardingPassword: 'pkg-pass',
         package: 'bfonboard1demo',
       }),
@@ -47,14 +47,14 @@ describe('igloo-home api import error normalization', async () => {
 
     await finalizeConnectedOnboarding({
       label: 'Demo Device',
-      vaultPassphrase: 'vault-pass',
+      passphrase: 'encrypted-profile-pass',
     });
 
     expect(invoke).toHaveBeenCalledWith('finalize_connected_onboarding_command', {
       input: {
         label: 'Demo Device',
         relay_profile: null,
-        vault_passphrase: 'vault-pass',
+        passphrase: 'encrypted-profile-pass',
       },
     });
   });
@@ -74,7 +74,7 @@ describe('igloo-home api import error normalization', async () => {
 
     await expect(
       importProfileFromBfprofile({
-        vaultPassphrase: 'vault-pass',
+        passphrase: 'encrypted-profile-pass',
         packagePassword: 'pkg-pass',
         packageText: 'bfprofile1demo',
       }),

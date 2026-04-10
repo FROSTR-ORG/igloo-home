@@ -50,7 +50,7 @@ export type ProfileManifest = {
   id: string;
   label: string;
   group_ref: string;
-  share_ref: string;
+  encrypted_profile_ref: string;
   relay_profile: string;
   runtime_options: unknown;
   policy_overrides: unknown;
@@ -70,7 +70,7 @@ export type ProfileImportResult =
   | {
       status: 'profile_created';
       profile: ProfileManifest;
-      vault_record: {
+      encrypted_profile: {
         id: string;
         kind: string;
         source: string;
@@ -84,12 +84,12 @@ export type ProfileImportResult =
     }
   | {
       status: 'onboarding_staged';
-      vault_record: {
+      encrypted_profile: {
         id: string;
       };
       staged_onboarding: {
         id: string;
-        vault_record_id: string;
+        encrypted_profile_id: string;
         label: string | null;
         relay_profile: string;
         peer_pubkey: string;

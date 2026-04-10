@@ -5,8 +5,6 @@ import type {
   ConnectedOnboardingPreview,
   DiscardConnectedOnboardingResult,
   GeneratedKeyset,
-  ProfileBackupPublishResult,
-  ProfileExportResult,
   ProfileImportResult,
   ProfileManifest,
   ProfilePackageExportResult,
@@ -39,7 +37,7 @@ export function importProfileFromRaw(input: {
   label?: string;
   relayProfile?: string | null;
   relayUrls: string[];
-  vaultPassphrase: string;
+  passphrase: string;
   groupPackageJson: string;
   sharePackageJson: string;
 }) {
@@ -48,7 +46,7 @@ export function importProfileFromRaw(input: {
       label: input.label ?? null,
       relay_profile: input.relayProfile ?? null,
       relay_urls: input.relayUrls,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
       group_package_json: input.groupPackageJson,
       share_package_json: input.sharePackageJson,
     },
@@ -58,7 +56,7 @@ export function importProfileFromRaw(input: {
 export function importProfileFromOnboarding(input: {
   label?: string;
   relayProfile?: string | null;
-  vaultPassphrase: string;
+  passphrase: string;
   onboardingPassword: string;
   package: string;
 }) {
@@ -66,7 +64,7 @@ export function importProfileFromOnboarding(input: {
     input: {
       label: input.label ?? null,
       relay_profile: input.relayProfile ?? null,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
       onboarding_password: input.onboardingPassword,
       package: input.package,
     },
@@ -88,13 +86,13 @@ export function connectOnboardingPackage(input: {
 export function finalizeConnectedOnboarding(input: {
   label?: string;
   relayProfile?: string | null;
-  vaultPassphrase: string;
+  passphrase: string;
 }) {
   return invoke<ProfileImportResult>('finalize_connected_onboarding_command', {
     input: {
       label: input.label ?? null,
       relay_profile: input.relayProfile ?? null,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
     },
   }).catch(normalizeHomeImportError);
 }
@@ -106,7 +104,7 @@ export function discardConnectedOnboarding() {
 export function importProfileFromBfprofile(input: {
   label?: string;
   relayProfile?: string | null;
-  vaultPassphrase: string;
+  passphrase: string;
   packagePassword: string;
   packageText: string;
 }) {
@@ -114,7 +112,7 @@ export function importProfileFromBfprofile(input: {
     input: {
       label: input.label ?? null,
       relay_profile: input.relayProfile ?? null,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
       package_password: input.packagePassword,
       package: input.packageText,
     },
@@ -124,7 +122,7 @@ export function importProfileFromBfprofile(input: {
 export function recoverProfileFromBfshare(input: {
   label?: string;
   relayProfile?: string | null;
-  vaultPassphrase: string;
+  passphrase: string;
   packagePassword: string;
   packageText: string;
 }) {
@@ -132,7 +130,7 @@ export function recoverProfileFromBfshare(input: {
     input: {
       label: input.label ?? null,
       relay_profile: input.relayProfile ?? null,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
       package_password: input.packagePassword,
       package: input.packageText,
     },
@@ -141,14 +139,14 @@ export function recoverProfileFromBfshare(input: {
 
 export function applyRotationUpdate(input: {
   targetProfileId: string;
-  vaultPassphrase: string;
+  passphrase: string;
   onboardingPassword: string;
   onboardingPackage: string;
 }) {
   return invoke<ProfileImportResult>('apply_rotation_update_command', {
     input: {
       target_profile_id: input.targetProfileId,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
       onboarding_password: input.onboardingPassword,
       onboarding_package: input.onboardingPackage,
     },
@@ -161,41 +159,18 @@ export function removeProfile(profileId: string) {
   });
 }
 
-export function exportProfile(input: {
-  profileId: string;
-  destinationDir: string;
-  vaultPassphrase: string;
-}) {
-  return invoke<ProfileExportResult>('export_profile_command', {
-    input: {
-      profile_id: input.profileId,
-      destination_dir: input.destinationDir,
-      vault_passphrase: input.vaultPassphrase,
-    },
-  });
-}
-
 export function exportProfilePackage(input: {
   profileId: string;
   packagePassword: string;
-  vaultPassphrase: string;
+  passphrase: string;
   format: 'bfprofile' | 'bfshare';
 }) {
   return invoke<ProfilePackageExportResult>('export_profile_package_command', {
     input: {
       profile_id: input.profileId,
       package_password: input.packagePassword,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
       format: input.format,
-    },
-  });
-}
-
-export function publishProfileBackup(input: { profileId: string; vaultPassphrase: string }) {
-  return invoke<ProfileBackupPublishResult>('publish_profile_backup_command', {
-    input: {
-      profile_id: input.profileId,
-      vault_passphrase: input.vaultPassphrase,
     },
   });
 }
@@ -248,11 +223,11 @@ export function profileRuntimeSnapshot(profileId?: string | null) {
   });
 }
 
-export function startProfileSession(input: { profileId: string; vaultPassphrase: string }) {
+export function startProfileSession(input: { profileId: string; passphrase: string }) {
   return invoke<ProfileRuntimeSnapshot>('start_profile_session_command', {
     input: {
       profile_id: input.profileId,
-      vault_passphrase: input.vaultPassphrase,
+      passphrase: input.passphrase,
     },
   });
 }

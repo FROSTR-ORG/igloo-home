@@ -8,10 +8,12 @@
     "build:app": "tsc && vite build && node ./scripts/check-built-css.mjs",
     "dev": "if [ \"${FROSTR_TEST_PREPARED:-0}\" = \"1\" ]; then vite --host 0.0.0.0 --port 1420 --strictPort; else npm run build:ui && vite --host 0.0.0.0 --port 1420 --strictPort; fi",
     "build": "npm run build:ui && npm run build:app",
+    "typecheck": "npm run build:ui && tsc --noEmit",
     "test:unit": "vitest run",
     "test:desktop": "node ./test/desktop/run.mjs",
+    "test:desktop:xvfb": "bash ./scripts/run-desktop-xvfb.sh",
     "test:visual": "node ./test/visual/run.mjs",
-    "test": "npm run test:unit",
+    "test": "npm run typecheck && npm run test:unit",
     "tauri": "tauri"
   },
   "dependencies": {

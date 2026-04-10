@@ -2,7 +2,6 @@ import {
   appPaths,
   connectOnboardingPackage,
   discardConnectedOnboarding,
-  exportProfile,
   finalizeConnectedOnboarding,
   listSessionLogs,
   listProfiles,
@@ -25,7 +24,6 @@ declare global {
       finalizeConnectedOnboarding: typeof finalizeConnectedOnboarding;
       discardConnectedOnboarding: typeof discardConnectedOnboarding;
       removeProfile: typeof removeProfile;
-      exportProfile: typeof exportProfile;
       startProfileSession: typeof startProfileSession;
       profileRuntimeSnapshot: typeof profileRuntimeSnapshot;
       stopSigner: typeof stopSigner;
@@ -44,7 +42,6 @@ export function installTestBridge() {
     finalizeConnectedOnboarding,
     discardConnectedOnboarding,
     removeProfile,
-    exportProfile,
     startProfileSession,
     profileRuntimeSnapshot,
     stopSigner,

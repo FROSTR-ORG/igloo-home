@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Result, anyhow, bail};
 
@@ -40,6 +42,17 @@ pub fn is_test_mode() -> bool {
     )
 }
 
+pub fn should_show_test_window() -> bool {
+    matches!(
+        std::env::var("IGLOO_HOME_TEST_SHOW_WINDOW").ok().as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    )
+}
+
+pub fn should_show_main_window() -> bool {
+    !is_test_mode() || should_show_test_window()
+}
+
 pub fn base_app_data_dir() -> Result<PathBuf> {
     if cfg!(target_os = "windows") {
         if let Some(value) = std::env::var_os("LOCALAPPDATA") {
@@ -61,4 +74,47 @@ pub fn base_app_data_dir() -> Result<PathBuf> {
         return Ok(PathBuf::from(value));
     }
     Ok(home.join(".local").join("share"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn shows_main_window_for_normal_app_runs() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::remove_var("IGLOO_HOME_TEST_MODE");
+            std::env::remove_var("IGLOO_HOME_TEST_SHOW_WINDOW");
+        }
+
+        assert!(should_show_main_window());
+    }
+
+    #[test]
+    fn hides_main_window_for_hidden_test_mode() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::set_var("IGLOO_HOME_TEST_MODE", "1");
+            std::env::remove_var("IGLOO_HOME_TEST_SHOW_WINDOW");
+        }
+
+        assert!(!should_show_main_window());
+    }
+
+    #[test]
+    fn shows_main_window_for_explicit_desktop_smoke() {
+        let _guard = env_lock().lock().unwrap();
+        unsafe {
+            std::env::set_var("IGLOO_HOME_TEST_MODE", "1");
+            std::env::set_var("IGLOO_HOME_TEST_SHOW_WINDOW", "1");
+        }
+
+        assert!(should_show_main_window());
+    }
 }

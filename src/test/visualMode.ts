@@ -28,7 +28,7 @@ type VisualScenarioState = {
     relays: string[];
   }>;
   selectedProfileId: string;
-  vaultPassphrase: string;
+  passphrase: string;
   generatedKeyset: GeneratedKeyset | null;
   runtimeSnapshot: ProfileRuntimeSnapshot | null;
   createForm: {
@@ -44,7 +44,7 @@ type VisualScenarioState = {
   }>;
   importForm: {
     label: string;
-    vaultPassphrase: string;
+    passphrase: string;
     relayUrls: string;
     groupPackageJson: string;
     sharePackageJson: string;
@@ -55,7 +55,7 @@ type VisualScenarioState = {
   };
   onboardSaveForm: {
     label: string;
-    vaultPassphrase: string;
+    passphrase: string;
     confirmPassphrase: string;
   };
   pendingOnboardConnection: ConnectedOnboardingPreview | null;
@@ -66,11 +66,11 @@ type VisualScenarioState = {
   loadMode: 'bfprofile' | 'bfshare';
   loadForm: {
     label: string;
-    vaultPassphrase: string;
+    passphrase: string;
     packagePassword: string;
     packageText: string;
   };
-  saveForms: Record<number, { label: string; vaultPassphrase: string; relayUrls: string }>;
+  saveForms: Record<number, { label: string; passphrase: string; relayUrls: string }>;
   packageDraft: {
     packagePassword: string;
   };
@@ -81,7 +81,7 @@ const sampleProfiles: ProfileManifest[] = [
     id: 'alice-laptop',
     label: 'Alice Laptop',
     group_ref: 'managed/group/alice.json',
-    share_ref: 'vault:alice',
+    encrypted_profile_ref: 'encrypted-profile:alice',
     relay_profile: 'default',
     runtime_options: {},
     policy_overrides: {},
@@ -94,7 +94,7 @@ const sampleProfiles: ProfileManifest[] = [
     id: 'bob-desktop',
     label: 'Bob Desktop',
     group_ref: 'managed/group/bob.json',
-    share_ref: 'vault:bob',
+    encrypted_profile_ref: 'encrypted-profile:bob',
     relay_profile: 'default',
     runtime_options: {},
     policy_overrides: {},
@@ -182,7 +182,7 @@ const baseState: VisualScenarioState = {
     },
   ],
   selectedProfileId: sampleProfiles[0].id,
-  vaultPassphrase: 'visual-preview-pass',
+  passphrase: 'visual-preview-pass',
   generatedKeyset: null,
   runtimeSnapshot: null,
   createForm: {
@@ -194,7 +194,7 @@ const baseState: VisualScenarioState = {
   },
   importForm: {
     label: 'Imported Device',
-    vaultPassphrase: 'visual-preview-pass',
+    passphrase: 'visual-preview-pass',
     relayUrls: 'wss://relay.primal.net\nwss://relay.damus.io',
     groupPackageJson: '{\n  "group": "demo"\n}',
     sharePackageJson: '{\n  "share": "demo"\n}',
@@ -205,7 +205,7 @@ const baseState: VisualScenarioState = {
   },
   onboardSaveForm: {
     label: 'Preview Onboard',
-    vaultPassphrase: 'visual-preview-pass',
+    passphrase: 'visual-preview-pass',
     confirmPassphrase: 'visual-preview-pass',
   },
   pendingOnboardConnection: {
@@ -224,14 +224,14 @@ const baseState: VisualScenarioState = {
   loadMode: 'bfprofile',
   loadForm: {
     label: 'Recovered Desktop',
-    vaultPassphrase: 'visual-preview-pass',
+    passphrase: 'visual-preview-pass',
     packagePassword: 'preview-password',
     packageText: 'bfprofile1visualpreview',
   },
   saveForms: {
-    1: { label: 'Alice Generated', vaultPassphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
-    2: { label: 'Bob Generated', vaultPassphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
-    3: { label: 'Carol Generated', vaultPassphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
+    1: { label: 'Alice Generated', passphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
+    2: { label: 'Bob Generated', passphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
+    3: { label: 'Carol Generated', passphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
   },
   packageDraft: {
     packagePassword: 'export-preview-password',

@@ -42,7 +42,7 @@ npm run tauri dev
 - onboarding is staged:
   - connect a `bfonboard`
   - review the resolved profile preview
-  - save the device locally with a vault passphrase
+  - save the device locally with a passphrase
 - desktop-specific behavior stays local to this repo:
   - Tauri command wiring
   - native dialogs and save/open flows

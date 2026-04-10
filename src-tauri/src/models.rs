@@ -1,7 +1,9 @@
 use bifrost_app::runtime::AppOptions;
+use bifrost_profile::{ProfileManifest, ProfilePreview};
 use bifrost_signer::DeviceStatus;
-use igloo_shell_core::shell::{DaemonMetadata, ProfileManifest, ProfilePreview};
 use serde::{Deserialize, Serialize};
+
+use crate::profiles::DaemonMetadata;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateKeysetRequest {
@@ -55,7 +57,7 @@ pub struct ImportProfileFromRawInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
     pub relay_urls: Vec<String>,
-    pub vault_passphrase: String,
+    pub passphrase: String,
     pub group_package_json: String,
     pub share_package_json: String,
 }
@@ -64,7 +66,7 @@ pub struct ImportProfileFromRawInput {
 pub struct ImportProfileFromOnboardingInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub vault_passphrase: String,
+    pub passphrase: String,
     pub onboarding_password: String,
     pub package: String,
 }
@@ -79,7 +81,7 @@ pub struct ConnectOnboardingPackageInput {
 pub struct FinalizeConnectedOnboardingInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub vault_passphrase: String,
+    pub passphrase: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,7 +93,7 @@ pub struct DiscardConnectedOnboardingResult {
 pub struct ImportProfileFromBfprofileInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub vault_passphrase: String,
+    pub passphrase: String,
     pub package_password: String,
     pub package: String,
 }
@@ -100,7 +102,7 @@ pub struct ImportProfileFromBfprofileInput {
 pub struct RecoverProfileFromBfshareInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub vault_passphrase: String,
+    pub passphrase: String,
     pub package_password: String,
     pub package: String,
 }
@@ -108,7 +110,7 @@ pub struct RecoverProfileFromBfshareInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplyRotationUpdateInput {
     pub target_profile_id: String,
-    pub vault_passphrase: String,
+    pub passphrase: String,
     pub onboarding_password: String,
     pub onboarding_package: String,
 }
@@ -122,14 +124,14 @@ pub struct RemoveProfileInput {
 pub struct ExportProfileInput {
     pub profile_id: String,
     pub destination_dir: String,
-    pub vault_passphrase: String,
+    pub passphrase: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportProfilePackageInput {
     pub profile_id: String,
     pub package_password: String,
-    pub vault_passphrase: String,
+    pub passphrase: String,
     pub format: String,
 }
 
@@ -144,7 +146,7 @@ pub struct ProfilePackageExportResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublishProfileBackupInput {
     pub profile_id: String,
-    pub vault_passphrase: String,
+    pub passphrase: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,7 +160,7 @@ pub struct ProfileBackupPublishResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StartProfileSessionRequest {
     pub profile_id: String,
-    pub vault_passphrase: String,
+    pub passphrase: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

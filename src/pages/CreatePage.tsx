@@ -9,7 +9,7 @@ import type { GeneratedKeyset, GeneratedKeysetShare } from '@/lib/types';
 
 type SaveDraft = {
   label: string;
-  vaultPassphrase: string;
+  passphrase: string;
   relayUrls: string;
 };
 
@@ -81,7 +81,7 @@ export default function CreatePage({
     <section className="igloo-flow-root igloo-stack">
       <CreateFlowTaskBanner
         kicker="Create Flow"
-        description="Generate a fresh keyset or rotate an existing one, choose the desktop share you want to keep locally, and save it into the shell-managed vault."
+        description="Generate a fresh keyset or rotate an existing one, choose the desktop share you want to keep locally, and save it into the encrypted profile store."
         points={[
           'Configure threshold and member count.',
           'Rotation uses threshold bfshare recovery material.',
@@ -111,7 +111,7 @@ export default function CreatePage({
           {generatedKeyset.shares.map((share) => {
             const draft = saveForms[share.member_idx] ?? {
               label: share.name,
-              vaultPassphrase: '',
+              passphrase: '',
               relayUrls: '',
             };
 
@@ -122,14 +122,14 @@ export default function CreatePage({
                 draft={{
                   label: draft.label,
                   relayUrls: draft.relayUrls,
-                  primarySecret: draft.vaultPassphrase,
+                  primarySecret: draft.passphrase,
                 }}
                 labelInputLabel="Device label"
-                primarySecretLabel="Vault passphrase"
+                primarySecretLabel="Passphrase"
                 actionLabel={selectedMemberIdx === share.member_idx ? 'Local Profile Saved' : 'Save Local Profile'}
                 actionVariant={selectedMemberIdx === share.member_idx ? 'secondary' : 'default'}
                 onLabelChange={(value) => onChangeSaveForm(share.member_idx, 'label', value)}
-                onPrimarySecretChange={(value) => onChangeSaveForm(share.member_idx, 'vaultPassphrase', value)}
+                onPrimarySecretChange={(value) => onChangeSaveForm(share.member_idx, 'passphrase', value)}
                 onRelayUrlsChange={(value) => onChangeSaveForm(share.member_idx, 'relayUrls', value)}
                 onAction={() => onSaveGeneratedProfile(share)}
               />

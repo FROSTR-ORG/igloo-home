@@ -68,6 +68,15 @@ describe('igloo-home api import error normalization', async () => {
     expect(invoke).toHaveBeenCalledWith('discard_connected_onboarding_command');
   });
 
+  it('invokes runtime peer refresh without extra payload', async () => {
+    invoke.mockResolvedValueOnce({ attempted: 1, refreshed: 1, failures: [] });
+    const { refreshRuntimePeers } = await import('@/lib/api');
+
+    await refreshRuntimePeers();
+
+    expect(invoke).toHaveBeenCalledWith('refresh_runtime_peers_command');
+  });
+
   it('normalizes duplicate-profile failures for bfprofile recovery imports', async () => {
     invoke.mockRejectedValueOnce(new Error('profile abc123 already exists'));
     const { importProfileFromBfprofile } = await import('@/lib/api');

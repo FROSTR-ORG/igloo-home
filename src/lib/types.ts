@@ -159,6 +159,17 @@ export type ProfileRuntimeSnapshot = {
   } | null;
 };
 
+export type RuntimePeerRefreshFailure = {
+  peer: string;
+  error: string;
+};
+
+export type RuntimePeerRefreshResult = {
+  attempted: number;
+  refreshed: number;
+  failures: RuntimePeerRefreshFailure[];
+};
+
 export type AppSettings = {
   close_to_tray: boolean;
   launch_on_login: boolean;

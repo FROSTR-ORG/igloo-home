@@ -8,6 +8,7 @@ import {
   importProfileFromOnboarding,
   importProfileFromRaw,
   profileRuntimeSnapshot,
+  refreshRuntimePeers,
   removeProfile,
   startProfileSession,
   stopSigner,
@@ -26,6 +27,7 @@ declare global {
       removeProfile: typeof removeProfile;
       startProfileSession: typeof startProfileSession;
       profileRuntimeSnapshot: typeof profileRuntimeSnapshot;
+      refreshRuntimePeers: typeof refreshRuntimePeers;
       stopSigner: typeof stopSigner;
       listSessionLogs: typeof listSessionLogs;
     };
@@ -44,6 +46,7 @@ export function installTestBridge() {
     removeProfile,
     startProfileSession,
     profileRuntimeSnapshot,
+    refreshRuntimePeers,
     stopSigner,
     listSessionLogs,
   };

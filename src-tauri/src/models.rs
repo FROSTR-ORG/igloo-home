@@ -184,6 +184,19 @@ pub struct ProfileRuntimeSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimePeerRefreshFailure {
+    pub peer: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimePeerRefreshResult {
+    pub attempted: usize,
+    pub refreshed: usize,
+    pub failures: Vec<RuntimePeerRefreshFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignerLogEntry {
     pub at: u64,
     pub level: String,

@@ -10,6 +10,7 @@ import type {
   ProfilePackageExportResult,
   ProfileRuntimeSnapshot,
   RelayProfile,
+  RuntimePeerRefreshResult,
   SignerLogEntry,
 } from '@/lib/types';
 
@@ -230,6 +231,10 @@ export function startProfileSession(input: { profileId: string; passphrase: stri
       passphrase: input.passphrase,
     },
   });
+}
+
+export function refreshRuntimePeers() {
+  return invoke<RuntimePeerRefreshResult>('refresh_runtime_peers_command');
 }
 
 export function stopSigner() {

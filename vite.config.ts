@@ -27,7 +27,7 @@ export default defineConfig(({ command }) => ({
     strictPort: true,
   },
   test: {
-    include: ['test/frontend/**/*.test.tsx'],
+    include: ['test/frontend/**/*.test.ts', 'test/frontend/**/*.test.tsx'],
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
   },

@@ -47,6 +47,8 @@ npm run tauri dev
   - Tauri command wiring
   - native dialogs and save/open flows
   - desktop runtime/session orchestration
+- the signer dashboard refresh action actively refreshes runtime peers and reports
+  partial per-peer failures inline instead of silently reloading the last snapshot
 
 ## Test
 

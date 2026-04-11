@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Result, bail};
 use tauri::State;
@@ -9,8 +10,8 @@ use crate::models::{
     ExportProfilePackageInput, FinalizeConnectedOnboardingInput, ImportProfileFromBfprofileInput,
     ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
     ProfileRuntimeSnapshot, PublishProfileBackupInput, RecoverProfileFromBfshareInput,
-    RemoveProfileInput, ResolveCloseRequestInput, RotateKeysetRequest, StartProfileSessionRequest,
-    UpdateProfileOperatorSettingsInput,
+    RemoveProfileInput, ResolveCloseRequestInput, RotateKeysetRequest, RuntimePeerRefreshFailure,
+    RuntimePeerRefreshResult, StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
 };
 use crate::profiles;
 use crate::session::{self, AppState};
@@ -223,6 +224,36 @@ pub async fn profile_runtime_snapshot(
     profile_id: Option<String>,
 ) -> Result<ProfileRuntimeSnapshot> {
     session::profile_session_snapshot(app, state, profile_id).await
+}
+
+pub async fn refresh_runtime_peers(state: &AppState) -> Result<RuntimePeerRefreshResult> {
+    let bridge = {
+        let guard = state.signer.lock().unwrap();
+        guard
+            .active
+            .as_ref()
+            .map(|active| active.bridge.clone())
+            .ok_or_else(|| anyhow::anyhow!("no active signer session"))?
+    };
+    let peers = bridge.runtime_metadata().await?.peers;
+    let mut refreshed = 0usize;
+    let mut failures = Vec::new();
+
+    for peer in &peers {
+        match bridge.ping(peer.clone(), Duration::from_secs(20)).await {
+            Ok(_) => refreshed += 1,
+            Err(error) => failures.push(RuntimePeerRefreshFailure {
+                peer: peer.clone(),
+                error: error.to_string(),
+            }),
+        }
+    }
+
+    Ok(RuntimePeerRefreshResult {
+        attempted: peers.len(),
+        refreshed,
+        failures,
+    })
 }
 
 pub async fn stop_signer(app: &tauri::AppHandle, state: &AppState, reason: &str) -> Result<()> {
@@ -480,6 +511,15 @@ pub async fn profile_runtime_snapshot_command(
     profile_id: Option<String>,
 ) -> std::result::Result<ProfileRuntimeSnapshot, String> {
     profile_runtime_snapshot(&app, state.inner(), profile_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn refresh_runtime_peers_command(
+    state: State<'_, AppState>,
+) -> std::result::Result<RuntimePeerRefreshResult, String> {
+    refresh_runtime_peers(state.inner())
         .await
         .map_err(|error| error.to_string())
 }

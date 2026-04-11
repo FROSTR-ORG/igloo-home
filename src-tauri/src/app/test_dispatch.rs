@@ -275,6 +275,18 @@ fn dispatch_runtime_command(
                 .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
             )
         }
+        "refresh_all_peers" => Some(
+            tauri::async_runtime::block_on(app::commands::refresh_runtime_peers(
+                state.inner(),
+            ))
+                .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+        ),
+        "refresh_runtime_peers" => Some(
+            tauri::async_runtime::block_on(app::commands::refresh_runtime_peers(
+                state.inner(),
+            ))
+            .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+        ),
         _ => None,
     };
     result.transpose()

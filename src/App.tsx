@@ -39,6 +39,7 @@ import {
   listProfiles,
   listRelayProfiles,
   profileRuntimeSnapshot,
+  refreshRuntimePeers,
   recoverProfileFromBfshare,
   removeProfile,
   resolveCloseRequest,
@@ -67,6 +68,7 @@ import type {
   ProfileManifest,
   ProfileRuntimeSnapshot,
   RelayProfile,
+  RuntimePeerRefreshResult,
   SignerLifecycleEvent,
   SignerLogEvent,
   SignerStatusEvent,
@@ -142,6 +144,12 @@ type RuntimeOptionsDraft = OperatorSignerSettings & {
   router_inbound_dedupe_cache_limit: number;
 };
 
+type PeerRefreshSummary = {
+  tone: 'success' | 'warning' | 'error';
+  message: string;
+  details: string[];
+};
+
 function splitTextarea(value: string) {
   return value
     .split(/\n+/)
@@ -206,6 +214,45 @@ function detectSettingsDraft(profile: ProfileManifest | null): RuntimeOptionsDra
 
 function numberOption(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function formatError(err: unknown) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function buildPeerRefreshSummary(result: RuntimePeerRefreshResult): PeerRefreshSummary {
+  const details = result.failures.map(
+    (failure) => `${shortProfileId(failure.peer)}: ${failure.error}`,
+  );
+
+  if (result.failures.length === 0) {
+    if (result.attempted === 0) {
+      return {
+        tone: 'success',
+        message: 'No peers were available to refresh.',
+        details: [],
+      };
+    }
+    return {
+      tone: 'success',
+      message: `Refreshed ${result.refreshed} of ${result.attempted} peers successfully.`,
+      details: [],
+    };
+  }
+
+  if (result.refreshed === 0) {
+    return {
+      tone: 'error',
+      message: `Peer refresh failed for all ${result.attempted} attempted peers.`,
+      details,
+    };
+  }
+
+  return {
+    tone: 'warning',
+    message: `Refreshed ${result.refreshed} of ${result.attempted} peers. ${result.failures.length} peer refresh failed.`,
+    details,
+  };
 }
 
 function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | null): OperatorPeerPermissionState[] {
@@ -503,6 +550,7 @@ export default function App() {
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ProfileRuntimeSnapshot | null>(
     visualScenario?.runtimeSnapshot ?? null,
   );
+  const [peerRefreshSummary, setPeerRefreshSummary] = useState<PeerRefreshSummary | null>(null);
   const [packageDraft, setPackageDraft] = useState<PackageExportDraft>(
     visualScenario?.packageDraft ?? { packagePassword: '' },
   );
@@ -527,6 +575,7 @@ export default function App() {
   useEffect(() => {
     setSettingsDraft(detectSettingsDraft(selectedProfile));
     setRelayDraft('');
+    setPeerRefreshSummary(null);
   }, [selectedProfileId, selectedProfile]);
 
   async function run<T>(label: string, task: () => Promise<T>) {
@@ -536,7 +585,7 @@ export default function App() {
     try {
       return await task();
     } catch (err) {
-      const message = String(err);
+      const message = formatError(err);
       setError(message);
       throw err;
     } finally {
@@ -587,7 +636,7 @@ export default function App() {
       setActiveView('landing');
       setRuntimeSnapshot(await profileRuntimeSnapshot(firstProfileId || null));
     } catch (err) {
-      setError(String(err));
+      setError(formatError(err));
     } finally {
       setBusy(null);
     }
@@ -615,6 +664,12 @@ export default function App() {
       setActiveView('onboard-connect');
     }
   }, [activeView, pendingOnboardConnection]);
+
+  useEffect(() => {
+    if (!runtimeSnapshot?.active) {
+      setPeerRefreshSummary(null);
+    }
+  }, [runtimeSnapshot?.active]);
 
   useEffect(() => {
     if (visualScenario) {
@@ -920,6 +975,7 @@ export default function App() {
         passphrase: sessionPassphrase,
       }),
     );
+    setPeerRefreshSummary(null);
     setRuntimeSnapshot(snapshot);
     setActiveView('dashboard');
     setActiveDashboardTab('signer');
@@ -938,10 +994,30 @@ export default function App() {
   }
 
   async function handleStopProfileSession() {
+    setPeerRefreshSummary(null);
     await run('stopping managed profile', async () => {
       await stopSigner();
       await refreshRuntime(selectedProfileId || null);
     });
+  }
+
+  async function handleRefreshRuntimePeers() {
+    if (!selectedProfileId || !runtimeSnapshot?.active) {
+      return;
+    }
+    setPeerRefreshSummary(null);
+    try {
+      const result = await run('refreshing runtime peers', () => refreshRuntimePeers());
+      setPeerRefreshSummary(buildPeerRefreshSummary(result));
+      await refreshRuntime(selectedProfileId);
+    } catch (err) {
+      setPeerRefreshSummary({
+        tone: 'error',
+        message: 'Peer refresh failed before runtime state could be reloaded.',
+        details: [formatError(err)],
+      });
+      throw err;
+    }
   }
 
   async function handleRemoveProfile(profileId: string) {
@@ -1017,6 +1093,7 @@ export default function App() {
       if (runtimeSnapshot?.active) {
         await stopSigner();
       }
+      setPeerRefreshSummary(null);
       setRuntimeSnapshot(null);
       setSelectedProfileId('');
       setPassphrase('');
@@ -1410,12 +1487,36 @@ export default function App() {
               runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
               runtimeSummaryLabel={runtimeSnapshot?.active ? 'Signer Running' : 'Signer Stopped'}
               runtimeError={error}
+              statusBanner={
+                peerRefreshSummary ? (
+                  <div
+                    className={`rounded-lg border px-3 py-2 text-sm ${
+                      peerRefreshSummary.tone === 'success'
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                        : peerRefreshSummary.tone === 'warning'
+                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                          : 'border-red-500/30 bg-red-500/10 text-red-200'
+                    }`}
+                  >
+                    <div>{peerRefreshSummary.message}</div>
+                    {peerRefreshSummary.details.length > 0 ? (
+                      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                        {peerRefreshSummary.details.map((detail) => (
+                          <li key={detail} className="break-all">
+                            {detail}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null
+              }
               onPrimaryAction={() =>
                 void (runtimeSnapshot?.active ? handleStopProfileSession() : handleStartProfileSession())
               }
               primaryActionVariant={runtimeSnapshot?.active ? 'destructive' : 'success'}
-              onRefreshPeers={() => void refreshRuntime(selectedProfileId || null)}
-              refreshPeersDisabled={!selectedProfileId}
+              onRefreshPeers={() => void handleRefreshRuntimePeers()}
+              refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
               peers={runtimePeers}
               pendingOperations={pendingOperations}
               logs={toLogEntries(runtimeSnapshot?.daemon_log_lines)}

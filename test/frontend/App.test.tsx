@@ -1,5 +1,5 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const currentVisualScenario = vi.hoisted(() => ({
   value: {
@@ -69,20 +69,7 @@ const currentVisualScenario = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(async () => () => {}),
-}));
-
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  confirm: vi.fn(async () => false),
-  open: vi.fn(async () => null),
-}));
-
-vi.mock('@/lib/testBridge', () => ({
-  installTestBridge: vi.fn(),
-}));
-
-vi.mock('@/lib/api', () => ({
+const apiMocks = vi.hoisted(() => ({
   applyRotationUpdate: vi.fn(),
   connectOnboardingPackage: vi.fn(),
   createGeneratedOnboardingPackage: vi.fn(),
@@ -99,6 +86,7 @@ vi.mock('@/lib/api', () => ({
   listRelayProfiles: vi.fn(),
   profileRuntimeSnapshot: vi.fn(),
   recoverProfileFromBfshare: vi.fn(),
+  refreshRuntimePeers: vi.fn(),
   removeProfile: vi.fn(),
   resolveCloseRequest: vi.fn(),
   startProfileSession: vi.fn(),
@@ -107,13 +95,77 @@ vi.mock('@/lib/api', () => ({
   updateSettings: vi.fn(),
 }));
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async () => () => {}),
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  confirm: vi.fn(async () => false),
+  open: vi.fn(async () => null),
+}));
+
+vi.mock('@/lib/testBridge', () => ({
+  installTestBridge: vi.fn(),
+}));
+
+vi.mock('@/lib/api', () => ({
+  applyRotationUpdate: apiMocks.applyRotationUpdate,
+  connectOnboardingPackage: apiMocks.connectOnboardingPackage,
+  createGeneratedOnboardingPackage: apiMocks.createGeneratedOnboardingPackage,
+  createGeneratedKeyset: apiMocks.createGeneratedKeyset,
+  createRotatedKeyset: apiMocks.createRotatedKeyset,
+  discardConnectedOnboarding: apiMocks.discardConnectedOnboarding,
+  exportProfilePackage: apiMocks.exportProfilePackage,
+  finalizeConnectedOnboarding: apiMocks.finalizeConnectedOnboarding,
+  getSettings: apiMocks.getSettings,
+  importProfileFromBfprofile: apiMocks.importProfileFromBfprofile,
+  importProfileFromOnboarding: apiMocks.importProfileFromOnboarding,
+  importProfileFromRaw: apiMocks.importProfileFromRaw,
+  listProfiles: apiMocks.listProfiles,
+  listRelayProfiles: apiMocks.listRelayProfiles,
+  profileRuntimeSnapshot: apiMocks.profileRuntimeSnapshot,
+  recoverProfileFromBfshare: apiMocks.recoverProfileFromBfshare,
+  refreshRuntimePeers: apiMocks.refreshRuntimePeers,
+  removeProfile: apiMocks.removeProfile,
+  resolveCloseRequest: apiMocks.resolveCloseRequest,
+  startProfileSession: apiMocks.startProfileSession,
+  stopSigner: apiMocks.stopSigner,
+  updateProfileOperatorSettings: apiMocks.updateProfileOperatorSettings,
+  updateSettings: apiMocks.updateSettings,
+}));
+
 vi.mock('@/test/visualMode', () => ({
   resolveVisualScenario: () => currentVisualScenario.value,
 }));
 
 import App from '@/App';
 
+function makeRuntimeSnapshot(active: boolean) {
+  return {
+    active,
+    profile: currentVisualScenario.value.profiles[0],
+    runtime_status: {
+      peers: [],
+    },
+    readiness: {
+      restore_complete: active,
+      sign_ready: active,
+    },
+    runtime_diagnostics: null,
+    daemon_log_path: null,
+    daemon_log_lines: [],
+    daemon_metadata: null,
+  };
+}
+
 describe('igloo-home landing shell', () => {
+  beforeEach(() => {
+    cleanup();
+    for (const mock of Object.values(apiMocks)) {
+      mock.mockReset();
+    }
+  });
+
   it('shows stored profiles on landing and does not render the retired inventory route', () => {
     currentVisualScenario.value = {
       ...currentVisualScenario.value,
@@ -145,5 +197,75 @@ describe('igloo-home landing shell', () => {
     expect(screen.getByRole('button', { name: 'logout' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /wipe all data/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /reset/i })).not.toBeInTheDocument();
+  });
+
+  it('refreshes runtime peers before reloading the runtime snapshot and shows partial failures inline', async () => {
+    const callOrder: string[] = [];
+    const activeSnapshot = makeRuntimeSnapshot(true);
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'dashboard',
+      activeDashboardTab: 'signer',
+      runtimeSnapshot: activeSnapshot,
+    };
+    apiMocks.refreshRuntimePeers.mockImplementation(async () => {
+      callOrder.push('refresh');
+      return {
+        attempted: 3,
+        refreshed: 2,
+        failures: [{ peer: 'peer-2', error: 'ping timeout' }],
+      };
+    });
+    apiMocks.profileRuntimeSnapshot.mockImplementation(async () => {
+      callOrder.push('snapshot');
+      return activeSnapshot;
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Peers' }));
+
+    await waitFor(() => {
+      expect(apiMocks.refreshRuntimePeers).toHaveBeenCalledTimes(1);
+      expect(apiMocks.profileRuntimeSnapshot).toHaveBeenCalledTimes(1);
+    });
+    expect(callOrder).toEqual(['refresh', 'snapshot']);
+    expect(screen.getByText('Refreshed 2 of 3 peers. 1 peer refresh failed.')).toBeInTheDocument();
+    expect(screen.getByText(/peer-2/i)).toBeInTheDocument();
+    expect(screen.getByText(/ping timeout/i)).toBeInTheDocument();
+  });
+
+  it('clears the peer refresh summary after the signer stops', async () => {
+    const activeSnapshot = makeRuntimeSnapshot(true);
+    const stoppedSnapshot = makeRuntimeSnapshot(false);
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'dashboard',
+      activeDashboardTab: 'signer',
+      runtimeSnapshot: activeSnapshot,
+    };
+    apiMocks.refreshRuntimePeers.mockResolvedValue({
+      attempted: 1,
+      refreshed: 1,
+      failures: [],
+    });
+    apiMocks.profileRuntimeSnapshot
+      .mockResolvedValueOnce(activeSnapshot)
+      .mockResolvedValueOnce(stoppedSnapshot);
+    apiMocks.stopSigner.mockResolvedValue(undefined);
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Peers' }));
+    await screen.findByText('Refreshed 1 of 1 peers successfully.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Signer' }));
+
+    await waitFor(() => {
+      expect(apiMocks.stopSigner).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText('Refreshed 1 of 1 peers successfully.')).not.toBeInTheDocument();
+    });
   });
 });

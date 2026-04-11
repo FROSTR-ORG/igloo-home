@@ -91,6 +91,7 @@ pub fn run() {
             super::commands::create_generated_onboarding_package_command,
             super::commands::start_profile_session_command,
             super::commands::profile_runtime_snapshot_command,
+            super::commands::refresh_runtime_peers_command,
             super::commands::stop_signer_command,
             super::settings::get_settings_command,
             super::settings::update_settings_command,

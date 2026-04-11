@@ -67,6 +67,10 @@ That suite is the primary end-to-end coverage for:
 
 It now prefers a hidden-window launch and will auto-run under `xvfb` on Linux when no desktop display is available.
 
+The desktop signer dashboard refresh control now performs an active peer refresh
+before reloading runtime state. Use its inline summary to confirm whether the
+refresh fully succeeded or only partially completed.
+
 ## Expected Validation Split
 
 - repo-local tests:

@@ -23,6 +23,16 @@ Desktop Tauri host for FROSTR.
 
 ## Build
 
+Workspace-owned entrypoints are the default for cross-repo flows:
+
+```bash
+make igloo-home-build
+make igloo-home-dev
+make igloo-home-test-e2e
+```
+
+For repo-local work inside `repos/igloo-home`, use the prep-first scripts:
+
 ```bash
 npm install
 npm run build
@@ -64,7 +74,7 @@ npm run test:visual
 Workspace E2E coverage:
 
 ```bash
-npm --prefix ../../test run test:e2e:igloo-home
+make igloo-home-test-e2e
 ```
 
 ## Project Docs

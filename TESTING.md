@@ -54,7 +54,7 @@ Visual coverage now includes:
 Use the shared browser/desktop harness for release validation:
 
 ```bash
-npm --prefix ../../test run test:e2e:igloo-home
+make igloo-home-test-e2e
 ```
 
 That suite is the primary end-to-end coverage for:
@@ -79,3 +79,6 @@ refresh fully succeeded or only partially completed.
   - desktop smoke only when explicitly requested, and only for minimal Tauri shell validation
 - workspace test harness:
   - full end-to-end desktop flows
+
+Repo-local public scripts now route through the shared workspace prep helper, so
+manual `npm run build:ui` is only needed for low-level debugging.

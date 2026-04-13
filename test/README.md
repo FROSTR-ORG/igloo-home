@@ -22,6 +22,6 @@
 
 ### Shared E2E
 
-- `npm --prefix ../../test run test:e2e:igloo-home` now launches `igloo-home` with the test TCP bridge enabled and the main window hidden by default
+- `make igloo-home-test-e2e` now launches `igloo-home` with the test TCP bridge enabled and the main window hidden by default
 - That shared E2E path now runs directly when `DISPLAY` or `WAYLAND_DISPLAY` is available, and otherwise auto-falls back to `xvfb-run` when present
 - Visible desktop windows are no longer part of the normal shared E2E path; explicit desktop smoke is the only window-showing test mode

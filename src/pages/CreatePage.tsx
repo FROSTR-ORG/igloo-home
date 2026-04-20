@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import {
   CreateFlowDistributionSection,
   CreateFlowGenerateCard,
@@ -22,6 +24,9 @@ type DistributionDraft = {
 type DistributionResult = {
   kind: 'copied' | 'qr' | 'saved';
   label: string;
+  packageText?: string;
+  targetPeerPubkey?: string;
+  tracking?: import('igloo-ui').SharedDistributionTrackingStatus;
 };
 
 type Props = {
@@ -55,6 +60,7 @@ type Props = {
   onChangeDistributionForm: (memberIdx: number, field: keyof DistributionDraft, value: string) => void;
   onDistributeShare: (memberIdx: number, kind: 'copy' | 'qr' | 'save') => void;
   onFinishDistribution: () => void;
+  distributionBeforeCards?: ReactNode;
 };
 
 export default function CreatePage({
@@ -76,6 +82,7 @@ export default function CreatePage({
   onChangeDistributionForm,
   onDistributeShare,
   onFinishDistribution,
+  distributionBeforeCards,
 }: Props) {
   return (
     <section className="igloo-flow-root igloo-stack">
@@ -152,6 +159,7 @@ export default function CreatePage({
               onChangeDraft={onChangeDistributionForm}
               onDistribute={onDistributeShare}
               onFinish={onFinishDistribution}
+              beforeCards={distributionBeforeCards}
             />
           ) : null}
         </section>

@@ -23,6 +23,7 @@ import {
   type LogEntry,
   type OperatorSignerSettings,
   type PeerPolicy,
+  type SharedDistributionTrackingStatus,
 } from 'igloo-ui';
 import {
   applyRotationUpdate,
@@ -101,6 +102,8 @@ type DistributionResult = {
   kind: 'copied' | 'qr' | 'saved';
   label: string;
   packageText: string;
+  targetPeerPubkey: string;
+  tracking?: SharedDistributionTrackingStatus;
 };
 
 type RotationDraft = {
@@ -149,6 +152,38 @@ type PeerRefreshSummary = {
   message: string;
   details: string[];
 };
+
+type RuntimeOnboardingStatus = {
+  pubkey: string;
+  stage: 'device_contacted_host' | 'handshake_completed' | 'failed';
+  updated_at: number;
+  error?: string | null;
+};
+
+type HomeRuntimeStatus = {
+  peers?: Array<{
+    idx?: number;
+    pubkey?: string;
+    known?: boolean;
+    last_seen?: number | null;
+    online?: boolean;
+    incoming_available?: number;
+    outgoing_available?: number;
+    outgoing_spent?: number;
+    can_sign?: boolean;
+    should_send_nonces?: boolean;
+  }>;
+  onboarding_statuses?: RuntimeOnboardingStatus[];
+  metadata?: {
+    peers?: string[];
+  };
+  pending_operations?: unknown[];
+  status?: {
+    last_active?: number;
+  };
+};
+
+const ACTIVE_RUNTIME_POLL_INTERVAL_MS = 2_000;
 
 function splitTextarea(value: string) {
   return value
@@ -253,6 +288,79 @@ function buildPeerRefreshSummary(result: RuntimePeerRefreshResult): PeerRefreshS
     message: `Refreshed ${result.refreshed} of ${result.attempted} peers. ${result.failures.length} peer refresh failed.`,
     details,
   };
+}
+
+function deriveDistributionResults(
+  results: Record<number, DistributionResult>,
+  shares: GeneratedKeysetShare[],
+  runtimeSnapshot: ProfileRuntimeSnapshot | null,
+) {
+  const runtimeStatus =
+    runtimeSnapshot?.runtime_status && typeof runtimeSnapshot.runtime_status === 'object'
+      ? (runtimeSnapshot.runtime_status as HomeRuntimeStatus)
+      : null;
+  const runtimePeers = new Map(
+    (runtimeStatus?.peers ?? [])
+      .filter((peer): peer is NonNullable<typeof peer> & { pubkey: string } => typeof peer?.pubkey === 'string')
+      .map((peer) => [peer.pubkey.toLowerCase(), peer]),
+  );
+  const onboardingStatuses = new Map(
+    (runtimeStatus?.onboarding_statuses ?? [])
+      .filter((status): status is RuntimeOnboardingStatus => typeof status?.pubkey === 'string')
+      .map((status) => [status.pubkey.toLowerCase(), status]),
+  );
+
+  return Object.fromEntries(
+    Object.entries(results).map(([memberIdx, result]) => {
+      const memberNumber = Number(memberIdx);
+      const targetPeerPubkey =
+        result.targetPeerPubkey?.toLowerCase() ??
+        shares.find((share) => share.member_idx === memberNumber)?.share_public_key?.toLowerCase() ??
+        '';
+      const peer = targetPeerPubkey ? runtimePeers.get(targetPeerPubkey) : null;
+      const onboarding = targetPeerPubkey ? onboardingStatuses.get(targetPeerPubkey) : null;
+
+      let tracking = result.tracking ?? { stage: 'waiting_for_device' as const };
+      if (peer?.can_sign) {
+        tracking = {
+          stage: 'sign_ready',
+          updatedAt: peer.last_seen ?? onboarding?.updated_at ?? tracking.updatedAt ?? null,
+        };
+      } else if (peer?.online) {
+        tracking = {
+          stage: 'peer_online',
+          updatedAt: peer.last_seen ?? onboarding?.updated_at ?? tracking.updatedAt ?? null,
+        };
+      } else if (onboarding?.stage === 'handshake_completed') {
+        tracking = {
+          stage: 'handshake_completed',
+          updatedAt: onboarding.updated_at,
+          error: onboarding.error ?? null,
+        };
+      } else if (onboarding?.stage === 'device_contacted_host') {
+        tracking = {
+          stage: 'device_contacted_host',
+          updatedAt: onboarding.updated_at,
+          error: onboarding.error ?? null,
+        };
+      } else if (onboarding?.stage === 'failed') {
+        tracking = {
+          stage: 'failed',
+          updatedAt: onboarding.updated_at,
+          error: onboarding.error ?? null,
+        };
+      }
+
+      return [
+        memberNumber,
+        {
+          ...result,
+          targetPeerPubkey: targetPeerPubkey || result.targetPeerPubkey,
+          tracking,
+        },
+      ];
+    }),
+  );
 }
 
 function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | null): OperatorPeerPermissionState[] {
@@ -660,6 +768,44 @@ export default function App() {
   }, [selectedProfileId, visualScenario]);
 
   useEffect(() => {
+    if (visualScenario) {
+      return;
+    }
+    const activeProfileId = runtimeSnapshot?.active ? runtimeSnapshot.profile?.id ?? null : null;
+    if (!activeProfileId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncRuntime = async () => {
+      try {
+        const snapshot = await profileRuntimeSnapshot(activeProfileId);
+        if (cancelled) {
+          return;
+        }
+        setRuntimeSnapshot((current) => {
+          if (!current?.active || current.profile?.id !== activeProfileId) {
+            return current;
+          }
+          return snapshot;
+        });
+      } catch {
+        // Ignore transient read failures while the runtime is stopping or being replaced.
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void syncRuntime();
+    }, ACTIVE_RUNTIME_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [runtimeSnapshot?.active, runtimeSnapshot?.profile?.id, visualScenario]);
+
+  useEffect(() => {
     if (activeView === 'onboard-save' && !pendingOnboardConnection) {
       setActiveView('onboard-connect');
     }
@@ -809,8 +955,25 @@ export default function App() {
     setPassphrase(draft.passphrase);
     await refreshProfiles(profile.id);
     setSelectedProfileId(profile.id);
+    try {
+      if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id !== profile.id) {
+        await stopSigner();
+      }
+      const snapshot = await run('starting managed profile', () =>
+        startProfileSession({
+          profileId: profile.id,
+          passphrase: draft.passphrase,
+        }),
+      );
+      setPeerRefreshSummary(null);
+      setRuntimeSnapshot(snapshot);
+      setNotice('Local profile created. Distribute the remaining shares as bfonboard packages.');
+    } catch (err) {
+      setNotice(
+        `Local profile created, but live onboarding tracking is paused until the signer starts: ${formatError(err)}`,
+      );
+    }
     setSelectedGeneratedShareIdx(share.member_idx);
-    setNotice('Local profile created. Distribute the remaining shares as bfonboard packages.');
     setActiveView('create');
   }
 
@@ -854,6 +1017,10 @@ export default function App() {
         kind: kind === 'copy' ? 'copied' : kind === 'save' ? 'saved' : 'qr',
         label: distribution.label,
         packageText,
+        targetPeerPubkey: targetShare.share_public_key,
+        tracking: {
+          stage: 'waiting_for_device',
+        },
       },
     }));
   }
@@ -959,7 +1126,11 @@ export default function App() {
     }
   }
 
-  async function handleStartProfileSession(profileId = selectedProfileId, sessionPassphrase = passphrase) {
+  async function handleStartProfileSession(
+    profileId = selectedProfileId,
+    sessionPassphrase = passphrase,
+    nextView: ViewKey = 'dashboard',
+  ) {
     if (!profileId) {
       throw new Error('select a profile first');
     }
@@ -977,8 +1148,10 @@ export default function App() {
     );
     setPeerRefreshSummary(null);
     setRuntimeSnapshot(snapshot);
-    setActiveView('dashboard');
-    setActiveDashboardTab('signer');
+    setActiveView(nextView);
+    if (nextView === 'dashboard') {
+      setActiveDashboardTab('signer');
+    }
   }
 
   async function handleLoadLandingProfile(profileId: string) {
@@ -1220,11 +1393,10 @@ export default function App() {
             saveForms={saveForms}
             selectedMemberIdx={selectedGeneratedShareIdx}
             distributionForms={distributionForms}
-            distributionResults={Object.fromEntries(
-              Object.entries(distributionResults).map(([memberIdx, result]) => [
-                Number(memberIdx),
-                { kind: result.kind, label: result.label },
-              ]),
+            distributionResults={deriveDistributionResults(
+              distributionResults,
+              generatedKeyset?.shares ?? [],
+              runtimeSnapshot,
             )}
             onChangeCreateForm={(field, value) => setCreateForm(current => ({ ...current, [field]: value }))}
             onChangeRotationSource={(index, field, value) =>
@@ -1262,6 +1434,45 @@ export default function App() {
             }
             onDistributeShare={(memberIdx, kind) => void handleDistributeGeneratedShare(memberIdx, kind)}
             onFinishDistribution={handleFinishDistribution}
+            distributionBeforeCards={selectedProfile ? (
+              <>
+                {!runtimeSnapshot?.active ? (
+                  <div className="igloo-shell-alert">
+                    Live onboarding tracking is paused until the host signer is running.
+                  </div>
+                ) : null}
+                <OperatorSignerPanel
+                  profile={{
+                    name: selectedProfile.label,
+                    groupPublicKey:
+                      typeof (runtimeSnapshot?.runtime_status as any)?.group_public_key === 'string'
+                        ? (runtimeSnapshot?.runtime_status as any).group_public_key
+                        : undefined,
+                  }}
+                  introMessage="The primary desktop signer should remain running while you distribute and track onboarding packages."
+                  runtimeState={
+                    runtimeSnapshot?.active ? 'running' : busy === 'starting managed profile' ? 'connecting' : 'stopped'
+                  }
+                  runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
+                  runtimeSummaryLabel={runtimeSnapshot?.active ? 'Signer Running' : 'Signer Stopped'}
+                  onPrimaryAction={() =>
+                    void (runtimeSnapshot?.active
+                      ? handleStopProfileSession()
+                      : handleStartProfileSession(
+                          selectedProfile.id,
+                          passphrase || landingPassphrases[selectedProfile.id] || '',
+                          'create',
+                        ))
+                  }
+                  primaryActionVariant={runtimeSnapshot?.active ? 'destructive' : 'success'}
+                  onRefreshPeers={() => void handleRefreshRuntimePeers()}
+                  refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
+                  peers={runtimePeers}
+                  pendingOperations={pendingOperations}
+                  logs={toLogEntries(runtimeSnapshot?.daemon_log_lines)}
+                />
+              </>
+            ) : null}
           />
           <QrPayloadModal
             open={Boolean(distributionQr)}

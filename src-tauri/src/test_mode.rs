@@ -40,9 +40,7 @@ pub fn start_server(app: &AppHandle) -> anyhow::Result<()> {
             Arc::new(trimmed.as_bytes().to_vec())
         }
         Err(_) => {
-            eprintln!(
-                "error: {TOKEN_ENV_VAR} not set; refusing to start loopback test server"
-            );
+            eprintln!("error: {TOKEN_ENV_VAR} not set; refusing to start loopback test server");
             return Ok(());
         }
     };
@@ -64,7 +62,11 @@ pub fn start_server(app: &AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn handle_client(app: AppHandle, mut stream: TcpStream, expected_token: &[u8]) -> anyhow::Result<()> {
+fn handle_client(
+    app: AppHandle,
+    mut stream: TcpStream,
+    expected_token: &[u8],
+) -> anyhow::Result<()> {
     let mut reader = BufReader::new(stream.try_clone()?);
 
     // First line of every connection must be a token handshake.

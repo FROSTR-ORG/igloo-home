@@ -7,6 +7,13 @@ edition = "2024"
 name = "igloo_home_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = []
+# Enables the loopback test-dispatch TCP server gated by
+# `IGLOO_HOME_TEST_MODE` + `IGLOO_HOME_TEST_TOKEN`. Must never be enabled
+# in release builds shipped to operators.
+test-server = ["dep:subtle"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -22,6 +29,7 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+subtle = { version = "2.5", optional = true }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"

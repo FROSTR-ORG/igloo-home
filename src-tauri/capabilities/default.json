@@ -3,5 +3,16 @@
   "identifier": "default",
   "description": "Default desktop capability for Igloo Home",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default", "autostart:default"]
+  "permissions": [
+    "core:event:default",
+    "core:path:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default",
+    "core:menu:default",
+    "dialog:allow-confirm",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
 }

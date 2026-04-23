@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -38,6 +39,7 @@ const artifactDir = process.env.IGLOO_HOME_DESKTOP_ARTIFACT_DIR
 await fs.mkdir(artifactDir, { recursive: true });
 
 const testPort = Number(process.env.IGLOO_HOME_TEST_PORT ?? `${19000 + Math.floor(Math.random() * 1000)}`);
+const testToken = process.env.IGLOO_HOME_TEST_TOKEN ?? randomBytes(32).toString('hex');
 const devLogPath = path.join(artifactDir, 'vite-dev.log');
 const appLogPath = path.join(artifactDir, 'app.log');
 const devServer = spawn('npm', ['run', 'dev'], {
@@ -47,6 +49,7 @@ const devServer = spawn('npm', ['run', 'dev'], {
     IGLOO_HOME_TEST_MODE: '1',
     IGLOO_HOME_TEST_SHOW_WINDOW: '1',
     IGLOO_HOME_TEST_PORT: String(testPort),
+    IGLOO_HOME_TEST_TOKEN: testToken,
     IGLOO_HOME_TEST_ROOT: rootDir,
     IGLOO_HOME_TEST_APP_DATA_DIR: path.join(rootDir, 'app-data'),
   },
@@ -70,7 +73,17 @@ let appExit = null;
 function startAppProcess() {
   appProcess = spawn(
     'cargo',
-    ['run', '--manifest-path', 'src-tauri/Cargo.toml', '--no-default-features', '--color', 'always', '--'],
+    [
+      'run',
+      '--manifest-path',
+      'src-tauri/Cargo.toml',
+      '--no-default-features',
+      '--features',
+      'test-server',
+      '--color',
+      'always',
+      '--',
+    ],
     {
       cwd: repoRoot,
       env: {
@@ -78,6 +91,7 @@ function startAppProcess() {
         IGLOO_HOME_TEST_MODE: '1',
         IGLOO_HOME_TEST_SHOW_WINDOW: '1',
         IGLOO_HOME_TEST_PORT: String(testPort),
+        IGLOO_HOME_TEST_TOKEN: testToken,
         IGLOO_HOME_TEST_ROOT: rootDir,
         IGLOO_HOME_TEST_APP_DATA_DIR: path.join(rootDir, 'app-data'),
       },
@@ -149,6 +163,7 @@ async function sendRequest(command, input = {}) {
     const socket = net.createConnection({ host: '127.0.0.1', port: testPort });
     let buffer = '';
     socket.on('connect', () => {
+      socket.write(`${JSON.stringify({ token: testToken })}\n`);
       socket.write(`${JSON.stringify({
         request_id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         command,

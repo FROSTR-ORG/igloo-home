@@ -308,6 +308,37 @@ fn dispatch_runtime_command(
 }
 
 #[cfg(test)]
+const EXPECTED_DISPATCH_COMMANDS: &[&str] = &[
+    // Keep sorted alphabetically. Maintained manually in lockstep with the
+    // match arms in `dispatch_app_free_command`, `dispatch_profile_command`,
+    // `dispatch_session_command`, and `dispatch_runtime_command`.
+    "app_paths",
+    "apply_rotation_update",
+    "connect_onboarding_package",
+    "create_generated_keyset",
+    "create_generated_onboarding_package",
+    "create_rotated_keyset",
+    "discard_connected_onboarding",
+    "export_profile",
+    "export_profile_package",
+    "finalize_connected_onboarding",
+    "health",
+    "import_profile_from_bfprofile",
+    "import_profile_from_onboarding",
+    "import_profile_from_raw",
+    "list_profiles",
+    "list_session_logs",
+    "navigate_view",
+    "profile_runtime_snapshot",
+    "publish_profile_backup",
+    "recover_profile_from_bfshare",
+    "refresh_runtime_peers",
+    "remove_profile",
+    "start_profile_session",
+    "stop_signer",
+];
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -336,5 +367,53 @@ mod tests {
         let error = dispatch_request(None, "nope", serde_json::json!({}))
             .expect_err("unknown command should fail");
         assert_eq!(error.to_string(), "unknown test command 'nope'");
+    }
+
+    #[test]
+    fn expected_dispatch_commands_list_is_sorted_and_unique() {
+        let mut sorted = EXPECTED_DISPATCH_COMMANDS.to_vec();
+        sorted.sort();
+        assert_eq!(
+            sorted.as_slice(),
+            EXPECTED_DISPATCH_COMMANDS,
+            "EXPECTED_DISPATCH_COMMANDS must stay sorted"
+        );
+        let mut deduped = sorted.clone();
+        deduped.dedup();
+        assert_eq!(
+            deduped.len(),
+            EXPECTED_DISPATCH_COMMANDS.len(),
+            "EXPECTED_DISPATCH_COMMANDS must not contain duplicates"
+        );
+    }
+
+    #[test]
+    fn every_expected_command_is_recognized_by_dispatcher() {
+        for command in EXPECTED_DISPATCH_COMMANDS {
+            let result = dispatch_request(None, command, serde_json::json!({}));
+            match result {
+                Ok(_) => {
+                    // app-free command returned a value — ok.
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    assert!(
+                        !message.starts_with("unknown test command"),
+                        "command {command} was reported as unknown by dispatcher: {message}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn removed_dispatch_aliases_are_unknown() {
+        // `refresh_all_peers` was a legacy alias; it must no longer dispatch.
+        let error = dispatch_request(None, "refresh_all_peers", serde_json::json!({}))
+            .expect_err("refresh_all_peers should be unknown after alias removal");
+        assert_eq!(
+            error.to_string(),
+            "unknown test command 'refresh_all_peers'"
+        );
     }
 }

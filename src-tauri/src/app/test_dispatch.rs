@@ -5,9 +5,10 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::models::{
     ApplyRotationUpdateInput, ConnectOnboardingPackageInput, CreateGeneratedOnboardingPackageInput,
     CreateKeysetRequest, ExportProfileInput, ExportProfilePackageInput,
-    FinalizeConnectedOnboardingInput, ImportProfileFromOnboardingInput, ImportProfileFromRawInput,
-    ListSessionLogsInput, PublishProfileBackupInput, RemoveProfileInput, RotateKeysetRequest,
-    StartProfileSessionRequest,
+    FinalizeConnectedOnboardingInput, ImportProfileFromBfprofileInput,
+    ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
+    PublishProfileBackupInput, RecoverProfileFromBfshareInput, RemoveProfileInput,
+    RotateKeysetRequest, StartProfileSessionRequest,
 };
 use crate::{app, session};
 
@@ -86,6 +87,8 @@ fn dispatch_profile_command(
                 | "list_profiles"
                 | "import_profile_from_raw"
                 | "import_profile_from_onboarding"
+                | "import_profile_from_bfprofile"
+                | "recover_profile_from_bfshare"
                 | "connect_onboarding_package"
                 | "finalize_connected_onboarding"
                 | "discard_connected_onboarding"
@@ -98,6 +101,7 @@ fn dispatch_profile_command(
                 | "navigate_view"
                 | "start_profile_session"
                 | "profile_runtime_snapshot"
+                | "refresh_runtime_peers"
                 | "stop_signer" => Err(anyhow::anyhow!(
                     "app handle required for test command '{}'",
                     command
@@ -127,6 +131,23 @@ fn dispatch_profile_command(
             let input: ImportProfileFromOnboardingInput = serde_json::from_value(input)?;
             Some(
                 tauri::async_runtime::block_on(app::commands::import_profile_from_onboarding(
+                    state.inner(),
+                    input,
+                ))
+                .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+            )
+        }
+        "import_profile_from_bfprofile" => {
+            let input: ImportProfileFromBfprofileInput = serde_json::from_value(input)?;
+            Some(
+                app::commands::import_profile_from_bfprofile(state.inner(), input)
+                    .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+            )
+        }
+        "recover_profile_from_bfshare" => {
+            let input: RecoverProfileFromBfshareInput = serde_json::from_value(input)?;
+            Some(
+                tauri::async_runtime::block_on(app::commands::recover_profile_from_bfshare(
                     state.inner(),
                     input,
                 ))
@@ -275,12 +296,6 @@ fn dispatch_runtime_command(
                 .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
             )
         }
-        "refresh_all_peers" => Some(
-            tauri::async_runtime::block_on(app::commands::refresh_runtime_peers(
-                state.inner(),
-            ))
-                .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
-        ),
         "refresh_runtime_peers" => Some(
             tauri::async_runtime::block_on(app::commands::refresh_runtime_peers(
                 state.inner(),

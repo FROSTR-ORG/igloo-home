@@ -37,8 +37,15 @@ pub fn run() {
         .manage(app_state)
         .setup(move |app| {
             crate::settings::apply_launch_on_login(&app.handle(), &settings)?;
+            #[cfg(feature = "test-server")]
             if crate::paths::is_test_mode() {
                 crate::test_mode::start_server(&app.handle())?;
+            }
+            #[cfg(not(feature = "test-server"))]
+            if crate::paths::is_test_mode() {
+                eprintln!(
+                    "warning: IGLOO_HOME_TEST_MODE set but binary built without test-server feature; ignoring"
+                );
             }
             let app_state = app.state::<AppState>();
             let _ = app.handle().emit(

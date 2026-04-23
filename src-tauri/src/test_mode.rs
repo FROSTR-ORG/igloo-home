@@ -1,3 +1,5 @@
+#![cfg(feature = "test-server")]
+
 use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};

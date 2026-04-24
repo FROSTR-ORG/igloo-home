@@ -575,10 +575,45 @@ pub async fn stop_signer_command(
 
 #[tauri::command]
 pub async fn list_session_logs_command(
+    app: AppHandle,
     state: State<'_, AppState>,
     input: ListSessionLogsInput,
 ) -> std::result::Result<Vec<crate::models::SignerLogEntry>, String> {
+    let input = canonicalize_session_log_input(&app, input)?;
     list_session_logs(state.inner(), input).map_err(|error| error.to_string())
+}
+
+/// Canonicalize an operator-supplied `runtime_dir` under the app's
+/// AppData root. When `runtime_dir` is None the fallback path
+/// (`state.last_session.runtime_dir`) is internally-sourced and not
+/// re-validated here.
+fn canonicalize_session_log_input(
+    app: &AppHandle,
+    input: ListSessionLogsInput,
+) -> std::result::Result<ListSessionLogsInput, String> {
+    let Some(raw) = input.runtime_dir.as_deref() else {
+        return Ok(input);
+    };
+    let roots = session_log_allowed_roots(app);
+    let canonical = path_scope::canonicalize_under_scope(raw, &roots)
+        .map_err(path_scope_error_message)?;
+    let canonical_str = canonical
+        .to_str()
+        .ok_or_else(|| "runtime_dir path contains invalid UTF-8".to_string())?
+        .to_string();
+    Ok(ListSessionLogsInput {
+        runtime_dir: Some(canonical_str),
+    })
+}
+
+/// Session logs may only live under the app's AppData directory.
+fn session_log_allowed_roots(app: &AppHandle) -> Vec<PathBuf> {
+    let resolver = app.path();
+    let mut roots = Vec::with_capacity(1);
+    if let Ok(path) = resolver.app_data_dir() {
+        roots.push(path);
+    }
+    roots
 }
 
 #[tauri::command]

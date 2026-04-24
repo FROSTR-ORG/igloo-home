@@ -273,14 +273,18 @@ mod tests {
     }
 
     #[test]
-    fn home_error_serializes_unit_variant_with_null_detail() {
+    fn home_error_serializes_unit_variant_with_kind_only() {
+        // serde's `#[serde(tag, content)]` enum repr omits the content field
+        // entirely for unit variants. The TypeScript `HomeErrorPayload` union
+        // declares `detail: null` for unit variants; at runtime the `detail`
+        // property is absent. Frontend code must switch on `kind` and never
+        // rely on `detail` being present (let alone `null`) for unit variants.
         let err = HomeError::InvalidPassphrase;
         let value = serde_json::to_value(&err).expect("serialize");
         assert_eq!(
             value,
             serde_json::json!({
-                "kind": "invalid_passphrase",
-                "detail": null
+                "kind": "invalid_passphrase"
             })
         );
     }

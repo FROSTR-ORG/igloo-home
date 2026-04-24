@@ -14,10 +14,90 @@ import type {
   SignerLogEntry,
 } from '@/lib/types';
 
-function normalizeHomeImportError(error: unknown): never {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/already exists/i.test(message)) {
-    throw new Error('Device profile already exists. Delete the existing device profile before importing this share.');
+/**
+ * Discriminated union emitted by Tauri commands. Mirrors the server-side
+ * `HomeError` enum in `src-tauri/src/error.rs`. The shape is stable:
+ * `{ kind: <snake_case>, detail: <payload_or_null> }`.
+ */
+export type HomeErrorPayload =
+  | { kind: 'profile_already_exists'; detail: { id: string } }
+  | { kind: 'invalid_passphrase'; detail: null }
+  | { kind: 'invalid_package'; detail: { reason: string } }
+  | { kind: 'onboarding_pending'; detail: { profile_id: string } }
+  | { kind: 'path_outside_allowed_roots'; detail: { path: string } }
+  | { kind: 'session_not_active'; detail: null }
+  | { kind: 'runtime'; detail: { message: string } }
+  | { kind: 'bifrost'; detail: { message: string } }
+  | { kind: 'internal'; detail: { message: string } };
+
+const HOME_ERROR_KINDS: ReadonlySet<HomeErrorPayload['kind']> = new Set([
+  'profile_already_exists',
+  'invalid_passphrase',
+  'invalid_package',
+  'onboarding_pending',
+  'path_outside_allowed_roots',
+  'session_not_active',
+  'runtime',
+  'bifrost',
+  'internal',
+]);
+
+/**
+ * Narrow an unknown value (typically from a Tauri `invoke(...).catch(...)`
+ * handler) to a `HomeErrorPayload`. Matches on the `kind` discriminator;
+ * avoids regex-matching on free-form error text.
+ */
+export function isHomeError(value: unknown): value is HomeErrorPayload {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const maybe = value as { kind?: unknown };
+  return typeof maybe.kind === 'string'
+    && HOME_ERROR_KINDS.has(maybe.kind as HomeErrorPayload['kind']);
+}
+
+/**
+ * Render a typed `HomeErrorPayload` as a human-friendly message. Every
+ * variant of `HomeError` maps to a specific sentence here — the frontend
+ * is no longer allowed to regex-match on error strings.
+ */
+export function homeErrorMessageForUser(err: HomeErrorPayload): string {
+  switch (err.kind) {
+    case 'profile_already_exists':
+      return 'Device profile already exists. Delete the existing device profile before importing this share.';
+    case 'invalid_passphrase':
+      return 'Incorrect passphrase.';
+    case 'invalid_package':
+      return `Invalid package: ${err.detail.reason}`;
+    case 'onboarding_pending':
+      return `An onboarding operation is already in progress for profile ${err.detail.profile_id}.`;
+    case 'path_outside_allowed_roots':
+      return `Path ${err.detail.path} is outside the allowed scope.`;
+    case 'session_not_active':
+      return 'No active signer session.';
+    case 'runtime':
+      return err.detail.message;
+    case 'bifrost':
+      return err.detail.message;
+    case 'internal':
+      return `Internal error: ${err.detail.message}`;
+  }
+}
+
+/**
+ * `catch` handler for Tauri invocations that may return a typed
+ * `HomeError`. If the rejection value matches the discriminated union we
+ * rethrow a plain `Error` carrying the user-facing message plus the
+ * original payload (attached as `cause`) so callers can inspect the
+ * `kind` without re-parsing. Non-`HomeError` rejections are rethrown
+ * unchanged.
+ */
+function rethrowHomeError(error: unknown): never {
+  if (isHomeError(error)) {
+    const message = homeErrorMessageForUser(error);
+    const wrapped: Error & { homeError?: HomeErrorPayload } = new Error(message);
+    wrapped.homeError = error;
+    throw wrapped;
   }
   throw error;
 }
@@ -51,7 +131,7 @@ export function importProfileFromRaw(input: {
       group_package_json: input.groupPackageJson,
       share_package_json: input.sharePackageJson,
     },
-  }).catch(normalizeHomeImportError);
+  }).catch(rethrowHomeError);
 }
 
 export function importProfileFromOnboarding(input: {
@@ -69,7 +149,7 @@ export function importProfileFromOnboarding(input: {
       onboarding_password: input.onboardingPassword,
       package: input.package,
     },
-  }).catch(normalizeHomeImportError);
+  }).catch(rethrowHomeError);
 }
 
 export function connectOnboardingPackage(input: {
@@ -81,7 +161,7 @@ export function connectOnboardingPackage(input: {
       onboarding_password: input.onboardingPassword,
       package: input.package,
     },
-  }).catch(normalizeHomeImportError);
+  }).catch(rethrowHomeError);
 }
 
 export function finalizeConnectedOnboarding(input: {
@@ -95,7 +175,7 @@ export function finalizeConnectedOnboarding(input: {
       relay_profile: input.relayProfile ?? null,
       passphrase: input.passphrase,
     },
-  }).catch(normalizeHomeImportError);
+  }).catch(rethrowHomeError);
 }
 
 export function discardConnectedOnboarding() {
@@ -117,7 +197,7 @@ export function importProfileFromBfprofile(input: {
       package_password: input.packagePassword,
       package: input.packageText,
     },
-  }).catch(normalizeHomeImportError);
+  }).catch(rethrowHomeError);
 }
 
 export function recoverProfileFromBfshare(input: {
@@ -135,7 +215,7 @@ export function recoverProfileFromBfshare(input: {
       package_password: input.packagePassword,
       package: input.packageText,
     },
-  }).catch(normalizeHomeImportError);
+  }).catch(rethrowHomeError);
 }
 
 export function applyRotationUpdate(input: {
@@ -151,7 +231,7 @@ export function applyRotationUpdate(input: {
       onboarding_password: input.onboardingPassword,
       onboarding_package: input.onboardingPackage,
     },
-  }).catch(normalizeHomeImportError);
+  }).catch(rethrowHomeError);
 }
 
 export function removeProfile(profileId: string) {

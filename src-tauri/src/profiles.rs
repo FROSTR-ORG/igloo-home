@@ -547,7 +547,7 @@ mod tests {
             hidden_pn: [5u8; 33],
             code: [6u8; 32],
         };
-        let mut onboarding_state = DeviceState::new(share.idx, share.seckey);
+        let mut onboarding_state = DeviceState::new(share.idx, *share.seckey.expose_bytes());
         onboarding_state
             .nonce_pool
             .store_incoming(1, vec![onboarding_nonce.clone()]);

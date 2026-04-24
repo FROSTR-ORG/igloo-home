@@ -182,7 +182,7 @@ pub fn make_generated_onboarding_package(
         .map_err(|error| anyhow!("parse share package: {error}"))?;
     encode_bfonboard_package(
         &BfOnboardPayload {
-            share_secret: hex::encode(share.seckey),
+            share_secret: hex::encode(share.seckey.expose_bytes()),
             relays: relay_urls,
             peer_pk: peer_pubkey,
         },
@@ -241,7 +241,7 @@ fn generated_keyset_response(
             name: format!("Member {}", share.idx),
             member_idx: share.idx,
             share_public_key: hex::encode(
-                k256::SecretKey::from_slice(&share.seckey)
+                k256::SecretKey::from_slice(share.seckey.expose_bytes())
                     .map_err(|error| anyhow!("invalid share seckey: {error}"))?
                     .public_key()
                     .to_encoded_point(true)
@@ -265,7 +265,7 @@ fn generated_keyset_response(
         count: shares.len() as u16,
         group_package_json,
         group_public_key: hex::encode(group.group_pk),
-        nsec: encode_nsec(&recovered.signing_key32)?,
+        nsec: encode_nsec(recovered.signing_key32.expose_bytes())?,
         shares: share_entries,
     })
 }
@@ -304,7 +304,7 @@ fn share_from_payload(
         .ok_or_else(|| anyhow!("share secret does not match any member in the recovered group"))?;
     Ok(SharePackage {
         idx: member.idx,
-        seckey,
+        seckey: bifrost_core::secret::SharePrivateKey::new(seckey),
     })
 }
 

@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
+
+use crate::path_scope::{self, PathScopeError};
 
 use crate::models::{
     AppPathsResponse, ApplyRotationUpdateInput, ConnectOnboardingPackageInput,
@@ -437,10 +439,47 @@ pub async fn remove_profile_command(
 
 #[tauri::command]
 pub async fn export_profile_command(
+    app: AppHandle,
     state: State<'_, AppState>,
     input: ExportProfileInput,
 ) -> std::result::Result<profiles::ProfileExportResult, String> {
+    let roots = export_profile_allowed_roots(&app);
+    let canonical = path_scope::canonicalize_under_scope(&input.destination_dir, &roots)
+        .map_err(path_scope_error_message)?;
+    let mut input = input;
+    input.destination_dir = canonical
+        .to_str()
+        .ok_or_else(|| "destination_dir path contains invalid UTF-8".to_string())?
+        .to_string();
     export_profile(state.inner(), input).map_err(|error| error.to_string())
+}
+
+/// Resolve the set of roots an operator-supplied export destination may
+/// live under. AppData is always included; Document is added when the
+/// host exposes a documents directory (may be absent in sandboxes / CI).
+fn export_profile_allowed_roots(app: &AppHandle) -> Vec<PathBuf> {
+    let resolver = app.path();
+    let mut roots = Vec::with_capacity(2);
+    if let Ok(path) = resolver.app_data_dir() {
+        roots.push(path);
+    }
+    if let Ok(path) = resolver.document_dir() {
+        roots.push(path);
+    }
+    roots
+}
+
+/// Render a [`PathScopeError`] as an operator-safe String. PR23 will
+/// migrate this to a typed `HomeError::PathOutsideAllowedRoots` variant;
+/// until then we keep the `Result<T, String>` contract shared by every
+/// other command in this file.
+fn path_scope_error_message(error: PathScopeError) -> String {
+    match error {
+        PathScopeError::OutsideAllowedRoots { path, .. } => {
+            format!("path {} is outside the allowed scope", path.display())
+        }
+        other => other.to_string(),
+    }
 }
 
 #[tauri::command]

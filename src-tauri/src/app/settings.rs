@@ -1,6 +1,7 @@
 use anyhow::Result;
 use tauri::{Emitter, State};
 
+use crate::error::HomeError;
 use crate::events;
 use crate::models::{AppSettings, AppSettingsEvent, SettingsUpdateInput};
 use crate::session::AppState;
@@ -36,7 +37,7 @@ pub fn update_settings(
 #[tauri::command]
 pub async fn get_settings_command(
     state: State<'_, AppState>,
-) -> std::result::Result<AppSettings, String> {
+) -> std::result::Result<AppSettings, HomeError> {
     Ok(get_settings(state.inner()))
 }
 
@@ -45,6 +46,6 @@ pub async fn update_settings_command(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     input: SettingsUpdateInput,
-) -> std::result::Result<AppSettings, String> {
-    update_settings(&app, state.inner(), input).map_err(|error| error.to_string())
+) -> std::result::Result<AppSettings, HomeError> {
+    Ok(update_settings(&app, state.inner(), input)?)
 }

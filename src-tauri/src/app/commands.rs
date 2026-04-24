@@ -4,7 +4,8 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use tauri::{AppHandle, Manager, State};
 
-use crate::path_scope::{self, PathScopeError};
+use crate::error::HomeError;
+use crate::path_scope;
 
 use crate::models::{
     AppPathsResponse, ApplyRotationUpdateInput, ConnectOnboardingPackageInput,
@@ -340,64 +341,60 @@ fn project_profile_backup_publish_result(
 #[tauri::command]
 pub async fn app_paths_command(
     state: State<'_, AppState>,
-) -> std::result::Result<AppPathsResponse, String> {
+) -> std::result::Result<AppPathsResponse, HomeError> {
     Ok(app_paths(state.inner()))
 }
 
 #[tauri::command]
 pub async fn list_profiles_command(
     state: State<'_, AppState>,
-) -> std::result::Result<Vec<profiles::ProfileManifest>, String> {
-    list_profiles(state.inner()).map_err(|error| error.to_string())
+) -> std::result::Result<Vec<profiles::ProfileManifest>, HomeError> {
+    Ok(list_profiles(state.inner())?)
 }
 
 #[tauri::command]
 pub async fn list_relay_profiles_command(
     state: State<'_, AppState>,
-) -> std::result::Result<Vec<profiles::RelayProfile>, String> {
-    list_relay_profiles(state.inner()).map_err(|error| error.to_string())
+) -> std::result::Result<Vec<profiles::RelayProfile>, HomeError> {
+    Ok(list_relay_profiles(state.inner())?)
 }
 
 #[tauri::command]
 pub async fn import_profile_from_raw_command(
     state: State<'_, AppState>,
     input: ImportProfileFromRawInput,
-) -> std::result::Result<profiles::ProfileImportResult, String> {
-    import_profile_from_raw(state.inner(), input).map_err(|error| error.to_string())
+) -> std::result::Result<profiles::ProfileImportResult, HomeError> {
+    Ok(import_profile_from_raw(state.inner(), input)?)
 }
 
 #[tauri::command]
 pub async fn import_profile_from_onboarding_command(
     state: State<'_, AppState>,
     input: ImportProfileFromOnboardingInput,
-) -> std::result::Result<profiles::ProfileImportResult, String> {
-    import_profile_from_onboarding(state.inner(), input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<profiles::ProfileImportResult, HomeError> {
+    Ok(import_profile_from_onboarding(state.inner(), input).await?)
 }
 
 #[tauri::command]
 pub async fn connect_onboarding_package_command(
     state: State<'_, AppState>,
     input: ConnectOnboardingPackageInput,
-) -> std::result::Result<crate::models::ConnectedOnboardingPreview, String> {
-    connect_onboarding_package(state.inner(), input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<crate::models::ConnectedOnboardingPreview, HomeError> {
+    Ok(connect_onboarding_package(state.inner(), input).await?)
 }
 
 #[tauri::command]
 pub async fn finalize_connected_onboarding_command(
     state: State<'_, AppState>,
     input: FinalizeConnectedOnboardingInput,
-) -> std::result::Result<profiles::ProfileImportResult, String> {
-    finalize_connected_onboarding(state.inner(), input).map_err(|error| error.to_string())
+) -> std::result::Result<profiles::ProfileImportResult, HomeError> {
+    Ok(finalize_connected_onboarding(state.inner(), input)?)
 }
 
 #[tauri::command]
 pub async fn discard_connected_onboarding_command(
     state: State<'_, AppState>,
-) -> std::result::Result<DiscardConnectedOnboardingResult, String> {
+) -> std::result::Result<DiscardConnectedOnboardingResult, HomeError> {
     Ok(discard_connected_onboarding(state.inner()))
 }
 
@@ -405,36 +402,32 @@ pub async fn discard_connected_onboarding_command(
 pub async fn import_profile_from_bfprofile_command(
     state: State<'_, AppState>,
     input: ImportProfileFromBfprofileInput,
-) -> std::result::Result<profiles::ProfileImportResult, String> {
-    import_profile_from_bfprofile(state.inner(), input).map_err(|error| error.to_string())
+) -> std::result::Result<profiles::ProfileImportResult, HomeError> {
+    Ok(import_profile_from_bfprofile(state.inner(), input)?)
 }
 
 #[tauri::command]
 pub async fn recover_profile_from_bfshare_command(
     state: State<'_, AppState>,
     input: RecoverProfileFromBfshareInput,
-) -> std::result::Result<profiles::ProfileImportResult, String> {
-    recover_profile_from_bfshare(state.inner(), input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<profiles::ProfileImportResult, HomeError> {
+    Ok(recover_profile_from_bfshare(state.inner(), input).await?)
 }
 
 #[tauri::command]
 pub async fn apply_rotation_update_command(
     state: State<'_, AppState>,
     input: ApplyRotationUpdateInput,
-) -> std::result::Result<profiles::ProfileImportResult, String> {
-    apply_rotation_update(state.inner(), input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<profiles::ProfileImportResult, HomeError> {
+    Ok(apply_rotation_update(state.inner(), input).await?)
 }
 
 #[tauri::command]
 pub async fn remove_profile_command(
     state: State<'_, AppState>,
     input: RemoveProfileInput,
-) -> std::result::Result<(), String> {
-    remove_profile(state.inner(), input).map_err(|error| error.to_string())
+) -> std::result::Result<(), HomeError> {
+    Ok(remove_profile(state.inner(), input)?)
 }
 
 #[tauri::command]
@@ -442,16 +435,17 @@ pub async fn export_profile_command(
     app: AppHandle,
     state: State<'_, AppState>,
     input: ExportProfileInput,
-) -> std::result::Result<profiles::ProfileExportResult, String> {
+) -> std::result::Result<profiles::ProfileExportResult, HomeError> {
     let roots = export_profile_allowed_roots(&app);
-    let canonical = path_scope::canonicalize_under_scope(&input.destination_dir, &roots)
-        .map_err(path_scope_error_message)?;
+    let canonical = path_scope::canonicalize_under_scope(&input.destination_dir, &roots)?;
     let mut input = input;
     input.destination_dir = canonical
         .to_str()
-        .ok_or_else(|| "destination_dir path contains invalid UTF-8".to_string())?
+        .ok_or_else(|| HomeError::Runtime {
+            message: "destination_dir path contains invalid UTF-8".to_string(),
+        })?
         .to_string();
-    export_profile(state.inner(), input).map_err(|error| error.to_string())
+    Ok(export_profile(state.inner(), input)?)
 }
 
 /// Resolve the set of roots an operator-supplied export destination may
@@ -469,67 +463,53 @@ fn export_profile_allowed_roots(app: &AppHandle) -> Vec<PathBuf> {
     roots
 }
 
-/// Render a [`PathScopeError`] as an operator-safe String. PR23 will
-/// migrate this to a typed `HomeError::PathOutsideAllowedRoots` variant;
-/// until then we keep the `Result<T, String>` contract shared by every
-/// other command in this file.
-fn path_scope_error_message(error: PathScopeError) -> String {
-    match error {
-        PathScopeError::OutsideAllowedRoots { path, .. } => {
-            format!("path {} is outside the allowed scope", path.display())
-        }
-        other => other.to_string(),
-    }
-}
-
 #[tauri::command]
 pub async fn export_profile_package_command(
     state: State<'_, AppState>,
     input: ExportProfilePackageInput,
-) -> std::result::Result<crate::models::ProfilePackageExportResult, String> {
-    export_profile_package(state.inner(), input).map_err(|error| error.to_string())
+) -> std::result::Result<crate::models::ProfilePackageExportResult, HomeError> {
+    Ok(export_profile_package(state.inner(), input)?)
 }
 
 #[tauri::command]
 pub async fn publish_profile_backup_command(
     state: State<'_, AppState>,
     input: PublishProfileBackupInput,
-) -> std::result::Result<crate::models::ProfileBackupPublishResult, String> {
-    publish_profile_backup(state.inner(), input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<crate::models::ProfileBackupPublishResult, HomeError> {
+    Ok(publish_profile_backup(state.inner(), input).await?)
 }
 
 #[tauri::command]
 pub async fn update_profile_operator_settings_command(
     state: State<'_, AppState>,
     input: UpdateProfileOperatorSettingsInput,
-) -> std::result::Result<profiles::ProfileManifest, String> {
-    update_profile_operator_settings(state.inner(), input).map_err(|error| error.to_string())
+) -> std::result::Result<profiles::ProfileManifest, HomeError> {
+    Ok(update_profile_operator_settings(state.inner(), input)?)
 }
 
 #[tauri::command]
 pub async fn create_generated_keyset_command(
     input: crate::models::CreateKeysetRequest,
-) -> std::result::Result<crate::models::GeneratedKeyset, String> {
-    create_generated_keyset(input.group_name, input.threshold, input.count)
-        .map_err(|error| error.to_string())
+) -> std::result::Result<crate::models::GeneratedKeyset, HomeError> {
+    Ok(create_generated_keyset(
+        input.group_name,
+        input.threshold,
+        input.count,
+    )?)
 }
 
 #[tauri::command]
 pub async fn create_rotated_keyset_command(
     input: RotateKeysetRequest,
-) -> std::result::Result<crate::models::GeneratedKeyset, String> {
-    create_rotated_keyset(input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<crate::models::GeneratedKeyset, HomeError> {
+    Ok(create_rotated_keyset(input).await?)
 }
 
 #[tauri::command]
 pub async fn create_generated_onboarding_package_command(
     input: CreateGeneratedOnboardingPackageInput,
-) -> std::result::Result<String, String> {
-    create_generated_onboarding_package(input).map_err(|error| error.to_string())
+) -> std::result::Result<String, HomeError> {
+    Ok(create_generated_onboarding_package(input)?)
 }
 
 #[tauri::command]
@@ -537,10 +517,8 @@ pub async fn start_profile_session_command(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     input: StartProfileSessionRequest,
-) -> std::result::Result<ProfileRuntimeSnapshot, String> {
-    start_profile_session(&app, state.inner(), input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<ProfileRuntimeSnapshot, HomeError> {
+    Ok(start_profile_session(&app, state.inner(), input).await?)
 }
 
 #[tauri::command]
@@ -548,29 +526,23 @@ pub async fn profile_runtime_snapshot_command(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     profile_id: Option<String>,
-) -> std::result::Result<ProfileRuntimeSnapshot, String> {
-    profile_runtime_snapshot(&app, state.inner(), profile_id)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<ProfileRuntimeSnapshot, HomeError> {
+    Ok(profile_runtime_snapshot(&app, state.inner(), profile_id).await?)
 }
 
 #[tauri::command]
 pub async fn refresh_runtime_peers_command(
     state: State<'_, AppState>,
-) -> std::result::Result<RuntimePeerRefreshResult, String> {
-    refresh_runtime_peers(state.inner())
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<RuntimePeerRefreshResult, HomeError> {
+    Ok(refresh_runtime_peers(state.inner()).await?)
 }
 
 #[tauri::command]
 pub async fn stop_signer_command(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-) -> std::result::Result<(), String> {
-    stop_signer(&app, state.inner(), "stopped")
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<(), HomeError> {
+    Ok(stop_signer(&app, state.inner(), "stopped").await?)
 }
 
 #[tauri::command]
@@ -578,9 +550,9 @@ pub async fn list_session_logs_command(
     app: AppHandle,
     state: State<'_, AppState>,
     input: ListSessionLogsInput,
-) -> std::result::Result<Vec<crate::models::SignerLogEntry>, String> {
+) -> std::result::Result<Vec<crate::models::SignerLogEntry>, HomeError> {
     let input = canonicalize_session_log_input(&app, input)?;
-    list_session_logs(state.inner(), input).map_err(|error| error.to_string())
+    Ok(list_session_logs(state.inner(), input)?)
 }
 
 /// Canonicalize an operator-supplied `runtime_dir` under the app's
@@ -590,16 +562,17 @@ pub async fn list_session_logs_command(
 fn canonicalize_session_log_input(
     app: &AppHandle,
     input: ListSessionLogsInput,
-) -> std::result::Result<ListSessionLogsInput, String> {
+) -> std::result::Result<ListSessionLogsInput, HomeError> {
     let Some(raw) = input.runtime_dir.as_deref() else {
         return Ok(input);
     };
     let roots = session_log_allowed_roots(app);
-    let canonical = path_scope::canonicalize_under_scope(raw, &roots)
-        .map_err(path_scope_error_message)?;
+    let canonical = path_scope::canonicalize_under_scope(raw, &roots)?;
     let canonical_str = canonical
         .to_str()
-        .ok_or_else(|| "runtime_dir path contains invalid UTF-8".to_string())?
+        .ok_or_else(|| HomeError::Runtime {
+            message: "runtime_dir path contains invalid UTF-8".to_string(),
+        })?
         .to_string();
     Ok(ListSessionLogsInput {
         runtime_dir: Some(canonical_str),
@@ -621,10 +594,8 @@ pub async fn resolve_close_request_command(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     input: ResolveCloseRequestInput,
-) -> std::result::Result<(), String> {
-    resolve_close_request(&app, state.inner(), input)
-        .await
-        .map_err(|error| error.to_string())
+) -> std::result::Result<(), HomeError> {
+    Ok(resolve_close_request(&app, state.inner(), input).await?)
 }
 
 #[cfg(test)]

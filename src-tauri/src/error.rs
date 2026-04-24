@@ -9,8 +9,6 @@
 //! [`scrub_for_display`] first to strip hex runs that may encode key
 //! material and to bound the output length.
 
-use std::fmt;
-
 use crate::path_scope::PathScopeError;
 
 /// Maximum length of a scrubbed error message crossing the IPC boundary.
@@ -66,24 +64,6 @@ pub enum HomeError {
     /// Unexpected internal error. Should not happen in normal operation.
     #[error("internal error")]
     Internal { message: String },
-}
-
-impl HomeError {
-    /// Wrap a free-form `anyhow::Error` as a bifrost-layer error, scrubbing
-    /// the message before it crosses the IPC boundary.
-    pub fn bifrost_from_anyhow(error: anyhow::Error) -> Self {
-        HomeError::Bifrost {
-            message: scrub_for_display(&error.to_string()),
-        }
-    }
-
-    /// Wrap a `std::fmt::Display`able error as a runtime error, scrubbing
-    /// the message.
-    pub fn runtime_from_display<E: fmt::Display>(error: E) -> Self {
-        HomeError::Runtime {
-            message: scrub_for_display(&error.to_string()),
-        }
-    }
 }
 
 /// Catch-all conversion from `anyhow::Error`. Inspects the root-cause

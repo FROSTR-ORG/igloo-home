@@ -478,7 +478,7 @@ mod tests {
     use crate::session::{PendingOnboardingState, make_app_state};
     use bifrost_app::onboarding::{BootstrapImportResult, BootstrapStateSnapshot};
     use bifrost_core::types::DerivedPublicNonce;
-    use bifrost_signer::DeviceState;
+    use bifrost_signer::{DeviceState, DeviceStatePersisted};
     use frostr_utils::{CreateKeysetConfig, create_keyset};
 
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -551,9 +551,10 @@ mod tests {
         onboarding_state
             .nonce_pool
             .store_incoming(1, vec![onboarding_nonce.clone()]);
+        let nonce_pool_secret = onboarding_state.secrets.nonce_pool_secret.clone();
         onboarding_state
             .nonce_pool
-            .generate_for_peer(1, 4)
+            .generate_for_peer(1, 4, &nonce_pool_secret)
             .expect("bootstrap outgoing");
 
         let completion = BootstrapImportResult {
@@ -567,7 +568,8 @@ mod tests {
             bootstrap_state: BootstrapStateSnapshot {
                 device_state_hex: {
                     let encoded =
-                        bincode::serialize(&onboarding_state).expect("serialize device state");
+                        bincode::serialize(&DeviceStatePersisted::from(&onboarding_state))
+                            .expect("serialize device state");
                     hex::encode(encoded)
                 },
             },

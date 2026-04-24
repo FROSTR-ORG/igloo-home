@@ -1,4 +1,5 @@
 mod app;
+mod error;
 mod events;
 mod models;
 mod path_scope;

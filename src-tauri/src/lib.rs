@@ -1,6 +1,7 @@
 mod app;
 mod events;
 mod models;
+mod path_scope;
 mod paths;
 mod profiles;
 mod session;

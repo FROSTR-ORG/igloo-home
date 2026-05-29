@@ -1,9 +1,24 @@
 use bifrost_app::runtime::AppOptions;
+use bifrost_core::secret::Passphrase;
 use bifrost_profile::{ProfileManifest, ProfilePreview};
 use bifrost_signer::DeviceStatus;
 use serde::{Deserialize, Serialize};
 
 use crate::profiles::DaemonMetadata;
+
+/// Deserialize a JSON string into a zeroizing [`Passphrase`].
+///
+/// `Passphrase` intentionally does not implement `Deserialize` (so it can
+/// never be accidentally pulled out of a persisted struct). This shim is the
+/// single, explicit conversion point at the Tauri IPC boundary: the frontend
+/// still sends a plain JSON string, and it is wrapped in the `ZeroizeOnDrop`
+/// newtype the moment it crosses into Rust.
+fn deserialize_passphrase<'de, D>(deserializer: D) -> Result<Passphrase, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Passphrase::new(String::deserialize(deserializer)?))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateKeysetRequest {
@@ -12,13 +27,16 @@ pub struct CreateKeysetRequest {
     pub count: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct RotationSourceInput {
     pub package: String,
-    pub package_password: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub package_password: Passphrase,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Holds `RotationSourceInput` (secret-bearing), so it is deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct RotateKeysetRequest {
     pub threshold: u16,
     pub count: u16,
@@ -44,44 +62,57 @@ pub struct GeneratedKeyset {
     pub shares: Vec<GeneratedKeysetShare>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input. Holds a `Passphrase`, so it drops `Clone` and
+// `Serialize` (this struct is only ever deserialized) and relies on the
+// redacted `Passphrase` `Debug`.
+#[derive(Debug, Deserialize)]
 pub struct CreateGeneratedOnboardingPackageInput {
     pub share_package_json: String,
     pub relay_urls: Vec<String>,
     pub peer_pubkey: String,
-    pub package_password: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub package_password: Passphrase,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct ImportProfileFromRawInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
     pub relay_urls: Vec<String>,
-    pub passphrase: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
     pub group_package_json: String,
     pub share_package_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct ImportProfileFromOnboardingInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub passphrase: String,
-    pub onboarding_password: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub onboarding_password: Passphrase,
     pub package: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct ConnectOnboardingPackageInput {
-    pub onboarding_password: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub onboarding_password: Passphrase,
     pub package: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct FinalizeConnectedOnboardingInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub passphrase: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,29 +120,38 @@ pub struct DiscardConnectedOnboardingResult {
     pub discarded: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct ImportProfileFromBfprofileInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub passphrase: String,
-    pub package_password: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub package_password: Passphrase,
     pub package: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct RecoverProfileFromBfshareInput {
     pub label: Option<String>,
     pub relay_profile: Option<String>,
-    pub passphrase: String,
-    pub package_password: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub package_password: Passphrase,
     pub package: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct ApplyRotationUpdateInput {
     pub target_profile_id: String,
-    pub passphrase: String,
-    pub onboarding_password: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub onboarding_password: Passphrase,
     pub onboarding_package: String,
 }
 
@@ -120,18 +160,23 @@ pub struct RemoveProfileInput {
     pub profile_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct ExportProfileInput {
     pub profile_id: String,
     pub destination_dir: String,
-    pub passphrase: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct ExportProfilePackageInput {
     pub profile_id: String,
-    pub package_password: String,
-    pub passphrase: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub package_password: Passphrase,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
     pub format: String,
 }
 
@@ -143,10 +188,12 @@ pub struct ProfilePackageExportResult {
     pub package: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct PublishProfileBackupInput {
     pub profile_id: String,
-    pub passphrase: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,10 +204,12 @@ pub struct ProfileBackupPublishResult {
     pub author_pubkey: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Secret-bearing IPC input; see note above. Deserialize-only.
+#[derive(Debug, Deserialize)]
 pub struct StartProfileSessionRequest {
     pub profile_id: String,
-    pub passphrase: String,
+    #[serde(deserialize_with = "deserialize_passphrase")]
+    pub passphrase: Passphrase,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

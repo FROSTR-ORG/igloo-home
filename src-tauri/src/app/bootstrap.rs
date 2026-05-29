@@ -132,6 +132,10 @@ fn maybe_run_profile_daemon() -> Option<Result<()>> {
         let profile = profile.ok_or_else(|| anyhow!("missing --profile"))?;
         let socket_path = socket_path.ok_or_else(|| anyhow!("missing --socket-path"))?;
         let token = token.ok_or_else(|| anyhow!("missing --token"))?;
+        // The control-socket token arrives as a 64-char hex CLI argument and
+        // is parsed into the `DaemonToken` newtype here at the boundary.
+        let token = bifrost_core::secret::DaemonToken::from_hex(&token)
+            .map_err(|err| anyhow!("invalid --token: {err}"))?;
         let (_profile, resolved) = crate::profiles::resolve_runtime(&shell_paths, &profile)?;
         bifrost_app::host::run_resolved_daemon(
             resolved,

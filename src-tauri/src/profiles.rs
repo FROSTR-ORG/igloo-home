@@ -3,6 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use bifrost_app::native_runtime;
+use bifrost_core::secret::Passphrase;
 use bifrost_app::runtime::AppOptions;
 use bifrost_app::runtime::ResolvedAppConfig;
 use bifrost_profile::{
@@ -110,14 +111,11 @@ pub fn resolve_runtime(
 pub fn resolve_runtime_for_passphrase(
     paths: &ShellPaths,
     profile_id: &str,
-    passphrase: &str,
+    passphrase: &Passphrase,
 ) -> Result<(ProfileManifest, ResolvedAppConfig)> {
     paths.ensure()?;
-    native_runtime::resolve_profile_runtime_for_passphrase(
-        paths,
-        profile_id,
-        Some(passphrase.to_string()),
-    )
+    // bifrost borrows the passphrase here.
+    native_runtime::resolve_profile_runtime_for_passphrase(paths, profile_id, Some(passphrase))
 }
 
 pub fn read_profile_daemon_metadata(
@@ -134,24 +132,32 @@ pub fn daemon_log_path_for_profile(paths: &ShellPaths, profile_id: &str) -> std:
 
 pub async fn preview_bfshare_recovery_package(
     package_raw: &str,
-    package_password: String,
+    package_password: Passphrase,
 ) -> Result<(ProfilePreview, BfProfilePayload)> {
-    bifrost_profile::preview_bfshare_recovery(package_raw, package_password, None).await
+    // bifrost-profile's package-password API still takes an owned `String`;
+    // borrow the secret here without producing an extra long-lived owned copy.
+    bifrost_profile::preview_bfshare_recovery(
+        package_raw,
+        package_password.expose_secret().to_string(),
+        None,
+    )
+    .await
 }
 
 pub async fn apply_rotation_update(
     paths: &ShellPaths,
     target_profile_id: &str,
     onboarding_package: &str,
-    onboarding_password: String,
-    passphrase: String,
+    onboarding_password: Passphrase,
+    passphrase: Passphrase,
 ) -> Result<ProfileImportResult> {
     paths.ensure()?;
     native_runtime::apply_rotation_update_from_bfonboard_value(
         paths,
         target_profile_id,
         onboarding_package,
-        onboarding_password,
+        // onboarding_password: bifrost still takes an owned `String`.
+        onboarding_password.expose_secret().to_string(),
         Some(passphrase),
     )
     .await
@@ -162,7 +168,7 @@ pub fn import_profile_from_raw_json(
     label: Option<String>,
     relay_profile: Option<String>,
     relay_urls: &[String],
-    passphrase: Option<String>,
+    passphrase: Option<Passphrase>,
     group_package_json: &str,
     share_package_json: &str,
 ) -> Result<ProfileImportResult> {
@@ -203,13 +209,16 @@ pub async fn import_profile_from_onboarding(
     paths: &ShellPaths,
     label: Option<String>,
     relay_profile: Option<String>,
-    passphrase: Option<String>,
-    onboarding_password: Option<String>,
+    passphrase: Option<Passphrase>,
+    onboarding_password: Option<Passphrase>,
     package_raw: &str,
 ) -> Result<ProfileImportResult> {
     paths.ensure()?;
     let package_raw = package_raw.trim();
-    let onboarding_password = onboarding_password.map(|value| value.trim().to_string());
+    // bifrost still takes the onboarding password as an owned `String`; trim
+    // the borrowed secret and hand over an owned copy at this seam.
+    let onboarding_password =
+        onboarding_password.map(|value| value.expose_secret().trim().to_string());
     native_runtime::import_profile_from_onboarding_value(
         paths,
         package_raw,
@@ -223,13 +232,14 @@ pub async fn import_profile_from_onboarding(
 
 pub async fn connect_onboarding_package(
     state: &AppState,
-    onboarding_password: String,
+    onboarding_password: Passphrase,
     package_raw: &str,
 ) -> Result<ConnectedOnboardingPreview> {
     state.shell_paths.ensure()?;
     let connected = native_runtime::connect_onboarding_package_preview(
         package_raw.trim(),
-        onboarding_password.trim().to_string(),
+        // bifrost still takes an owned `String` here.
+        onboarding_password.expose_secret().trim().to_string(),
     )
     .await?;
     let preview = ConnectedOnboardingPreview {
@@ -243,7 +253,7 @@ pub fn finalize_connected_onboarding(
     state: &AppState,
     label: Option<String>,
     relay_profile: Option<String>,
-    passphrase: String,
+    passphrase: Passphrase,
 ) -> Result<ProfileImportResult> {
     state.shell_paths.ensure()?;
     let pending = state
@@ -270,15 +280,16 @@ pub fn import_profile_from_bfprofile(
     paths: &ShellPaths,
     label: Option<String>,
     relay_profile: Option<String>,
-    passphrase: Option<String>,
-    package_password: String,
+    passphrase: Option<Passphrase>,
+    package_password: Passphrase,
     package_raw: &str,
 ) -> Result<ProfileImportResult> {
     paths.ensure()?;
     bifrost_profile::import_profile_from_bfprofile_value(
         paths,
         package_raw.trim(),
-        package_password.trim().to_string(),
+        // bifrost still takes the package password as an owned `String`.
+        package_password.expose_secret().trim().to_string(),
         label,
         relay_profile,
         passphrase,
@@ -289,15 +300,16 @@ pub async fn recover_profile_from_bfshare(
     paths: &ShellPaths,
     label: Option<String>,
     relay_profile: Option<String>,
-    passphrase: Option<String>,
-    package_password: String,
+    passphrase: Option<Passphrase>,
+    package_password: Passphrase,
     package_raw: &str,
 ) -> Result<ProfileImportResult> {
     paths.ensure()?;
     bifrost_profile::recover_profile_from_bfshare_value(
         paths,
         package_raw.trim(),
-        package_password.trim().to_string(),
+        // bifrost still takes the package password as an owned `String`.
+        package_password.expose_secret().trim().to_string(),
         label,
         relay_profile,
         passphrase,
@@ -309,33 +321,38 @@ pub fn export_managed_profile(
     paths: &ShellPaths,
     profile_id: &str,
     out_dir: &Path,
-    passphrase: Option<String>,
+    passphrase: Option<Passphrase>,
 ) -> Result<ProfileExportResult> {
     paths.ensure()?;
-    bifrost_profile::export_profile(paths, profile_id, out_dir, passphrase)
+    // bifrost borrows the passphrase here; pass a reference into the owned
+    // `Option<Passphrase>` so the secret stays zeroize-on-drop.
+    bifrost_profile::export_profile(paths, profile_id, out_dir, passphrase.as_ref())
 }
 
 pub fn export_managed_profile_package(
     paths: &ShellPaths,
     profile_id: &str,
     format: &str,
-    package_password: String,
-    passphrase: Option<String>,
+    package_password: Passphrase,
+    passphrase: Option<Passphrase>,
 ) -> Result<ProfilePackageExportResult> {
     paths.ensure()?;
+    // bifrost still takes the package password as an owned `String`; the
+    // profile passphrase is borrowed.
+    let package_password = package_password.expose_secret().to_string();
     match format {
         "bfprofile" => bifrost_profile::export_profile_as_bfprofile(
             paths,
             profile_id,
             package_password,
-            passphrase,
+            passphrase.as_ref(),
             None,
         ),
         "bfshare" => bifrost_profile::export_profile_as_bfshare(
             paths,
             profile_id,
             package_password,
-            passphrase,
+            passphrase.as_ref(),
             None,
         ),
         _ => bail!("unsupported export format {format}; expected bfprofile or bfshare"),
@@ -345,10 +362,11 @@ pub fn export_managed_profile_package(
 pub async fn publish_managed_profile_backup(
     paths: &ShellPaths,
     profile_id: &str,
-    passphrase: Option<String>,
+    passphrase: Option<Passphrase>,
 ) -> Result<ProfileBackupPublishResult> {
     paths.ensure()?;
-    bifrost_profile::publish_profile_backup(paths, profile_id, passphrase).await
+    // bifrost borrows the passphrase here.
+    bifrost_profile::publish_profile_backup(paths, profile_id, passphrase.as_ref()).await
 }
 
 pub fn remove_managed_profile(paths: &ShellPaths, profile_id: &str) -> Result<()> {
@@ -617,7 +635,7 @@ mod tests {
                 &state,
                 Some("Desktop Pending Device".to_string()),
                 Some("local".to_string()),
-                "encrypted-profile-pass".to_string(),
+                Passphrase::new("encrypted-profile-pass".to_string()),
             )
             .is_err()
         );
@@ -635,7 +653,7 @@ mod tests {
             &state,
             Some("Desktop Pending Device".to_string()),
             Some("local".to_string()),
-            "encrypted-profile-pass".to_string(),
+            Passphrase::new("encrypted-profile-pass".to_string()),
         )
         .expect("finalize pending onboarding");
         match result {
@@ -650,7 +668,7 @@ mod tests {
                 &state,
                 Some("Desktop Pending Device".to_string()),
                 Some("local".to_string()),
-                "encrypted-profile-pass".to_string(),
+                Passphrase::new("encrypted-profile-pass".to_string()),
             )
             .is_err()
         );
@@ -666,7 +684,7 @@ mod tests {
             Some("Broken Import".to_string()),
             None,
             &["ws://127.0.0.1:8194".to_string()],
-            Some("encrypted-profile-pass".to_string()),
+            Some(Passphrase::new("encrypted-profile-pass".to_string())),
             "{\"invalid\":true}",
             "{\"invalid\":true}",
         )

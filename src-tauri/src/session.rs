@@ -16,6 +16,7 @@ use bech32::{Bech32, Hrp};
 use bifrost_bridge_tokio::Bridge;
 use bifrost_codec::{encode_group_package_json, encode_share_package_json, parse_share_package};
 use bifrost_core::get_group_id;
+use bifrost_core::secret::Passphrase;
 use bifrost_core::types::{GroupPackage, SharePackage};
 use frostr_utils::{
     BfOnboardPayload, CreateKeysetConfig, RecoverKeyInput, RotateKeysetRequest, create_keyset,
@@ -173,7 +174,7 @@ pub fn make_generated_onboarding_package(
     share_package_json: &str,
     relay_urls: Vec<String>,
     peer_pubkey: String,
-    package_password: String,
+    package_password: Passphrase,
 ) -> Result<String> {
     if relay_urls.is_empty() {
         bail!("at least one relay is required");
@@ -186,7 +187,8 @@ pub fn make_generated_onboarding_package(
             relays: relay_urls,
             peer_pk: peer_pubkey,
         },
-        &package_password,
+        // encode_bfonboard_package borrows the password as `&str`.
+        package_password.expose_secret(),
     )
     .map_err(|error| anyhow!("encode bfonboard package: {error}"))
 }

@@ -9,6 +9,7 @@ use bifrost_app::runtime::{
     load_or_init_signer_resolved,
 };
 use bifrost_bridge_tokio::{Bridge, BridgeConfig, NostrSdkAdapter};
+use bifrost_core::secret::Passphrase;
 use bifrost_signer::DeviceStore;
 use tauri::{AppHandle, Emitter};
 
@@ -38,7 +39,7 @@ pub async fn start_profile_session(
 fn resolve_runtime_for_start(
     shell_paths: &ShellPaths,
     profile_id: &str,
-    passphrase: &str,
+    passphrase: &Passphrase,
 ) -> Result<(ProfileManifest, ResolvedAppConfig)> {
     resolve_runtime_for_passphrase(shell_paths, profile_id, passphrase)
 }
@@ -356,7 +357,7 @@ mod tests {
             Some("Desktop Session Test".to_string()),
             Some("local".to_string()),
             &["ws://127.0.0.1:8194".to_string()],
-            Some(passphrase.to_string()),
+            Some(Passphrase::new(passphrase.to_string())),
             &group_json,
             &share_json,
         )
@@ -386,8 +387,9 @@ mod tests {
 
         assert!(crate::profiles::resolve_runtime(&shell_paths, &profile.id).is_err());
 
+        let passphrase = Passphrase::new("encrypted-profile-pass".to_string());
         let (resolved_profile, resolved) =
-            resolve_runtime_for_start(&shell_paths, &profile.id, "encrypted-profile-pass")
+            resolve_runtime_for_start(&shell_paths, &profile.id, &passphrase)
                 .expect("resolve runtime with explicit passphrase");
         assert_eq!(resolved_profile.id, profile.id);
         assert_eq!(resolved.relays, vec!["ws://127.0.0.1:8194".to_string()]);

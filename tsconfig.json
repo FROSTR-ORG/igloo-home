@@ -19,6 +19,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "igloo-shared": ["../igloo-shared/src/index.ts"],
       "igloo-ui": ["../igloo-ui/src/index.ts"]
     }
   },

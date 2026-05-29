@@ -9,6 +9,7 @@ export default defineConfig(({ command }) => ({
     dedupe: ['react', 'react-dom'],
     alias: [
       { find: '@', replacement: path.resolve(__dirname, 'src') },
+      { find: /^igloo-shared$/, replacement: path.resolve(__dirname, '../igloo-shared/src/index.ts') },
       { find: /^igloo-ui$/, replacement: path.resolve(__dirname, '../igloo-ui/src/index.ts') },
       {
         find: /^igloo-ui\/styles\.css$/,

@@ -24,6 +24,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
+    "igloo-shared": "file:../igloo-shared",
     "igloo-ui": "file:../igloo-ui",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

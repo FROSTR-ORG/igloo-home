@@ -2,6 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { confirm } from '@tauri-apps/plugin-dialog';
 import { shortProfileId } from '@/lib/profileIdentity';
+import type {
+  RuntimeOnboardingStatus,
+  RuntimePeerPermissionState,
+  RuntimePeerStatus,
+  RuntimePendingOperation,
+} from 'igloo-shared';
+import { parseRuntimeStatus } from '@/lib/runtime-status';
 import {
   AppHeader,
   Button,
@@ -153,36 +160,6 @@ type PeerRefreshSummary = {
   details: string[];
 };
 
-type RuntimeOnboardingStatus = {
-  pubkey: string;
-  stage: 'device_contacted_host' | 'handshake_completed' | 'failed';
-  updated_at: number;
-  error?: string | null;
-};
-
-type HomeRuntimeStatus = {
-  peers?: Array<{
-    idx?: number;
-    pubkey?: string;
-    known?: boolean;
-    last_seen?: number | null;
-    online?: boolean;
-    incoming_available?: number;
-    outgoing_available?: number;
-    outgoing_spent?: number;
-    can_sign?: boolean;
-    should_send_nonces?: boolean;
-  }>;
-  onboarding_statuses?: RuntimeOnboardingStatus[];
-  metadata?: {
-    peers?: string[];
-  };
-  pending_operations?: unknown[];
-  status?: {
-    last_active?: number;
-  };
-};
-
 const ACTIVE_RUNTIME_POLL_INTERVAL_MS = 2_000;
 
 function splitTextarea(value: string) {
@@ -295,13 +272,10 @@ function deriveDistributionResults(
   shares: GeneratedKeysetShare[],
   runtimeSnapshot: ProfileRuntimeSnapshot | null,
 ) {
-  const runtimeStatus =
-    runtimeSnapshot?.runtime_status && typeof runtimeSnapshot.runtime_status === 'object'
-      ? (runtimeSnapshot.runtime_status as HomeRuntimeStatus)
-      : null;
+  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
   const runtimePeers = new Map(
     (runtimeStatus?.peers ?? [])
-      .filter((peer): peer is NonNullable<typeof peer> & { pubkey: string } => typeof peer?.pubkey === 'string')
+      .filter((peer): peer is RuntimePeerStatus => typeof peer?.pubkey === 'string')
       .map((peer) => [peer.pubkey.toLowerCase(), peer]),
   );
   const onboardingStatuses = new Map(
@@ -364,92 +338,79 @@ function deriveDistributionResults(
 }
 
 function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | null): OperatorPeerPermissionState[] {
-  const fromRuntime =
-    runtimeSnapshot?.runtime_status &&
-    typeof runtimeSnapshot.runtime_status === 'object' &&
-    'peer_permission_states' in runtimeSnapshot.runtime_status
-      ? (runtimeSnapshot.runtime_status as { peer_permission_states?: unknown }).peer_permission_states
-      : null;
-  if (Array.isArray(fromRuntime)) {
-    return fromRuntime
-      .map((policy): OperatorPeerPermissionState | null => {
-        if (typeof policy !== 'object' || policy === null) return null;
-        const typed = policy as Record<string, unknown>;
-        if (typeof typed.pubkey !== 'string') return null;
-        return {
-          pubkey: typed.pubkey,
-          manualOverride: {
-            request: {
-              ping: ((((typed.manual_override as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.ping as 'unset' | 'allow' | 'deny') ?? 'unset'),
-              onboard: ((((typed.manual_override as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.onboard as 'unset' | 'allow' | 'deny') ?? 'unset'),
-              sign: ((((typed.manual_override as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.sign as 'unset' | 'allow' | 'deny') ?? 'unset'),
-              ecdh: ((((typed.manual_override as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.ecdh as 'unset' | 'allow' | 'deny') ?? 'unset'),
-            },
-            respond: {
-              ping: ((((typed.manual_override as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.ping as 'unset' | 'allow' | 'deny') ?? 'unset'),
-              onboard: ((((typed.manual_override as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.onboard as 'unset' | 'allow' | 'deny') ?? 'unset'),
-              sign: ((((typed.manual_override as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.sign as 'unset' | 'allow' | 'deny') ?? 'unset'),
-              ecdh: ((((typed.manual_override as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.ecdh as 'unset' | 'allow' | 'deny') ?? 'unset'),
-            },
+  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
+  const fromRuntime = runtimeStatus?.peer_permission_states;
+  if (!Array.isArray(fromRuntime)) return [];
+  return fromRuntime
+    .map((policy: RuntimePeerPermissionState): OperatorPeerPermissionState | null => {
+      if (typeof policy !== 'object' || policy === null) return null;
+      if (typeof policy.pubkey !== 'string') return null;
+      const manualOverride = policy.manual_override;
+      const remoteObservation = policy.remote_observation;
+      const effectivePolicy = policy.effective_policy;
+      return {
+        pubkey: policy.pubkey,
+        manualOverride: {
+          request: {
+            ping: manualOverride?.request?.ping ?? 'unset',
+            onboard: manualOverride?.request?.onboard ?? 'unset',
+            sign: manualOverride?.request?.sign ?? 'unset',
+            ecdh: manualOverride?.request?.ecdh ?? 'unset',
           },
-          remoteObservation:
-            typed.remote_observation && typeof typed.remote_observation === 'object'
-              ? {
-                  request: {
-                    ping: Boolean((((typed.remote_observation as Record<string, unknown>).request as Record<string, unknown> | undefined)?.ping)),
-                    onboard: Boolean((((typed.remote_observation as Record<string, unknown>).request as Record<string, unknown> | undefined)?.onboard)),
-                    sign: Boolean((((typed.remote_observation as Record<string, unknown>).request as Record<string, unknown> | undefined)?.sign)),
-                    ecdh: Boolean((((typed.remote_observation as Record<string, unknown>).request as Record<string, unknown> | undefined)?.ecdh)),
-                  },
-                  respond: {
-                    ping: Boolean((((typed.remote_observation as Record<string, unknown>).respond as Record<string, unknown> | undefined)?.ping)),
-                    onboard: Boolean((((typed.remote_observation as Record<string, unknown>).respond as Record<string, unknown> | undefined)?.onboard)),
-                    sign: Boolean((((typed.remote_observation as Record<string, unknown>).respond as Record<string, unknown> | undefined)?.sign)),
-                    ecdh: Boolean((((typed.remote_observation as Record<string, unknown>).respond as Record<string, unknown> | undefined)?.ecdh)),
-                  },
-                  updated: Number((typed.remote_observation as Record<string, unknown>).updated ?? 0),
-                  revision: Number((typed.remote_observation as Record<string, unknown>).revision ?? 0),
-                }
-              : null,
-          effectivePolicy: {
-            request: {
-              ping: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.ping)),
-              onboard: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.onboard)),
-              sign: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.sign)),
-              ecdh: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.request as Record<string, unknown> | undefined)?.ecdh)),
-            },
-            respond: {
-              ping: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.ping)),
-              onboard: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.onboard)),
-              sign: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.sign)),
-              ecdh: Boolean((((typed.effective_policy as Record<string, unknown> | undefined)?.respond as Record<string, unknown> | undefined)?.ecdh)),
-            },
+          respond: {
+            ping: manualOverride?.respond?.ping ?? 'unset',
+            onboard: manualOverride?.respond?.onboard ?? 'unset',
+            sign: manualOverride?.respond?.sign ?? 'unset',
+            ecdh: manualOverride?.respond?.ecdh ?? 'unset',
           },
-        };
-      })
-      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-  }
-  return [];
+        },
+        remoteObservation:
+          remoteObservation && typeof remoteObservation === 'object'
+            ? {
+                request: {
+                  ping: Boolean(remoteObservation.request?.ping),
+                  onboard: Boolean(remoteObservation.request?.onboard),
+                  sign: Boolean(remoteObservation.request?.sign),
+                  ecdh: Boolean(remoteObservation.request?.ecdh),
+                },
+                respond: {
+                  ping: Boolean(remoteObservation.respond?.ping),
+                  onboard: Boolean(remoteObservation.respond?.onboard),
+                  sign: Boolean(remoteObservation.respond?.sign),
+                  ecdh: Boolean(remoteObservation.respond?.ecdh),
+                },
+                updated: Number(remoteObservation.updated ?? 0),
+                revision: Number(remoteObservation.revision ?? 0),
+              }
+            : null,
+        effectivePolicy: {
+          request: {
+            ping: Boolean(effectivePolicy?.request?.ping),
+            onboard: Boolean(effectivePolicy?.request?.onboard),
+            sign: Boolean(effectivePolicy?.request?.sign),
+            ecdh: Boolean(effectivePolicy?.request?.ecdh),
+          },
+          respond: {
+            ping: Boolean(effectivePolicy?.respond?.ping),
+            onboard: Boolean(effectivePolicy?.respond?.onboard),
+            sign: Boolean(effectivePolicy?.respond?.sign),
+            ecdh: Boolean(effectivePolicy?.respond?.ecdh),
+          },
+        },
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 }
 
 function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): PeerPolicy[] {
   const permissionStateByPubkey = new Map(
     extractPeerPermissionStates(runtimeSnapshot).map((entry) => [entry.pubkey.toLowerCase(), entry])
   );
-  const runtimeStatus =
-    runtimeSnapshot?.runtime_status && typeof runtimeSnapshot.runtime_status === 'object'
-      ? (runtimeSnapshot.runtime_status as Record<string, unknown>)
-      : null;
-  const peers = Array.isArray(runtimeStatus?.peers)
-    ? (runtimeStatus?.peers as Record<string, unknown>[])
+  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
+  const peers: RuntimePeerStatus[] = Array.isArray(runtimeStatus?.peers) ? runtimeStatus.peers : [];
+  const metadataPeers: string[] = Array.isArray(runtimeStatus?.metadata?.peers)
+    ? runtimeStatus.metadata.peers
     : [];
-  const metadataPeers =
-    runtimeStatus &&
-    typeof runtimeStatus.metadata === 'object' &&
-    runtimeStatus.metadata &&
-    Array.isArray((runtimeStatus.metadata as Record<string, unknown>).peers)
-      ? ((runtimeStatus.metadata as Record<string, unknown>).peers as unknown[])
-      : [];
   const rows = new Map<string, PeerPolicy>();
 
   for (const [index, pubkey] of metadataPeers.entries()) {
@@ -498,27 +459,22 @@ function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): Pe
 }
 
 function extractPendingOperations(runtimeSnapshot: ProfileRuntimeSnapshot | null): OperatorPendingOperation[] {
-  const fromRuntime =
-    runtimeSnapshot?.runtime_status &&
-    typeof runtimeSnapshot.runtime_status === 'object' &&
-    'pending_operations' in runtimeSnapshot.runtime_status
-      ? (runtimeSnapshot.runtime_status as { pending_operations?: unknown }).pending_operations
-      : null;
+  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
+  const fromRuntime = runtimeStatus?.pending_operations;
   if (!Array.isArray(fromRuntime)) return [];
   return fromRuntime
-    .map((operation): OperatorPendingOperation | null => {
+    .map((operation: RuntimePendingOperation): OperatorPendingOperation | null => {
       if (!operation || typeof operation !== 'object') return null;
-      const typed = operation as Record<string, unknown>;
-      if (typeof typed.request_id !== 'string' || typeof typed.op_type !== 'string') return null;
+      if (typeof operation.request_id !== 'string' || typeof operation.op_type !== 'string') return null;
       return {
-        request_id: typed.request_id,
-        op_type: typed.op_type,
-        threshold: typeof typed.threshold === 'number' ? typed.threshold : 0,
-        started_at: typeof typed.started_at === 'number' ? typed.started_at : null,
-        timeout_at: typeof typed.timeout_at === 'number' ? typed.timeout_at : null,
-        collected_responses: Array.isArray(typed.collected_responses) ? typed.collected_responses.length : 0,
-        target_peers: Array.isArray(typed.target_peers)
-          ? typed.target_peers.filter((peer): peer is string => typeof peer === 'string')
+        request_id: operation.request_id,
+        op_type: operation.op_type,
+        threshold: typeof operation.threshold === 'number' ? operation.threshold : 0,
+        started_at: typeof operation.started_at === 'number' ? operation.started_at : null,
+        timeout_at: typeof operation.timeout_at === 'number' ? operation.timeout_at : null,
+        collected_responses: Array.isArray(operation.collected_responses) ? operation.collected_responses.length : 0,
+        target_peers: Array.isArray(operation.target_peers)
+          ? operation.target_peers.filter((peer): peer is string => typeof peer === 'string')
           : [],
       };
     })
@@ -1290,9 +1246,9 @@ export default function App() {
 
       {activeView === 'landing' ? (
         <ContentCard title="Welcome to Igloo" description="Choose one path to initialize this desktop workspace.">
-          <section className="igloo-flow-root igloo-pwa-entry-shell">
-            <div className="igloo-pwa-entry-intro">
-              <p className="igloo-pwa-entry-lead">
+          <section className="igloo-flow-root igloo-entry-shell">
+            <div className="igloo-entry-intro">
+              <p className="igloo-entry-lead">
                 Create or rotate a keyset, load an existing profile, or finish onboarding a device from an accepted package.
               </p>
             </div>
@@ -1336,7 +1292,7 @@ export default function App() {
                 </div>
               )}
             />
-            <div className="igloo-pwa-entry-grid">
+            <div className="igloo-entry-grid">
               <HostEntryTile
                 kicker="Fresh setup"
                 title="Create / Rotate Keyset"

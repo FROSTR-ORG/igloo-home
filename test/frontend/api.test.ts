@@ -12,7 +12,10 @@ describe('igloo-home api import error normalization', async () => {
   });
 
   it('normalizes duplicate-profile failures for onboarding imports', async () => {
-    invoke.mockRejectedValueOnce(new Error('profile abc123 already exists'));
+    // Tauri commands reject with the typed HomeError discriminated union
+    // ({ kind, detail }), not a free-form string; rethrowHomeError() maps it to
+    // the user-facing message. Mocking a plain Error would bypass that path.
+    invoke.mockRejectedValueOnce({ kind: 'profile_already_exists', detail: { id: 'abc123' } });
     const { importProfileFromOnboarding } = await import('@/lib/api');
 
     await expect(
@@ -78,7 +81,7 @@ describe('igloo-home api import error normalization', async () => {
   });
 
   it('normalizes duplicate-profile failures for bfprofile recovery imports', async () => {
-    invoke.mockRejectedValueOnce(new Error('profile abc123 already exists'));
+    invoke.mockRejectedValueOnce({ kind: 'profile_already_exists', detail: { id: 'abc123' } });
     const { importProfileFromBfprofile } = await import('@/lib/api');
 
     await expect(

@@ -542,12 +542,8 @@ mod tests {
     }
 
     fn sample_connected_onboarding() -> ConnectedOnboardingImport {
-        let bundle = create_keyset(CreateKeysetConfig {
-            group_name: "Desktop Test Group".to_string(),
-            threshold: 2,
-            count: 3,
-        })
-        .expect("create keyset");
+        let bundle = create_keyset(CreateKeysetConfig::new("Desktop Test Group", 2, 3))
+            .expect("create keyset");
         let group = bundle.group.clone();
         let share = bundle
             .shares

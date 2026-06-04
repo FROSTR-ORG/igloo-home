@@ -114,11 +114,9 @@ pub fn make_generated_keyset(
     threshold: u16,
     count: u16,
 ) -> Result<GeneratedKeyset> {
-    let bundle = create_keyset(CreateKeysetConfig {
-        group_name,
-        threshold,
-        count,
-    })?;
+    // `::new` defaults the reconciled `signing_key32` (imported-nsec) field to
+    // None — a freshly generated desktop keyset has no imported signing key.
+    let bundle = create_keyset(CreateKeysetConfig::new(group_name, threshold, count))?;
     generated_keyset_response("generated", bundle.group, bundle.shares)
 }
 

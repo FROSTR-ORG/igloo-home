@@ -344,12 +344,8 @@ mod tests {
             },
         )
         .expect("write relay profile");
-        let bundle = create_keyset(CreateKeysetConfig {
-            group_name: "Session Test Group".to_string(),
-            threshold: 2,
-            count: 3,
-        })
-        .expect("create keyset");
+        let bundle = create_keyset(CreateKeysetConfig::new("Session Test Group", 2, 3))
+            .expect("create keyset");
         let group_json = encode_group_package_json(&bundle.group).expect("group json");
         let share_json = encode_share_package_json(&bundle.shares[1]).expect("share package json");
         let result = crate::profiles::import_profile_from_raw_json(

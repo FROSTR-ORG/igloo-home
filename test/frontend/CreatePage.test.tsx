@@ -29,7 +29,7 @@ describe('CreatePage', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create New Keyset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Keyset' }));
     expect(onChangeCreateForm).toHaveBeenCalledWith('mode', 'new');
     expect(screen.getByRole('button', { name: 'Add bfshare Source' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add bfshare Source' }));

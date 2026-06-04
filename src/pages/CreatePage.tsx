@@ -1,10 +1,13 @@
 import type { ReactNode } from 'react';
 
 import {
+  Button,
   CreateFlowDistributionSection,
   CreateFlowGenerateCard,
   CreateFlowLocalSaveCard,
   CreateFlowTaskBanner,
+  RotateKeysetPanel,
+  type SharedDistributionResult,
 } from 'igloo-ui';
 
 import type { GeneratedKeyset, GeneratedKeysetShare } from '@/lib/types';
@@ -19,14 +22,6 @@ type DistributionDraft = {
   label: string;
   packagePassword: string;
   confirmPassword: string;
-};
-
-type DistributionResult = {
-  kind: 'copied' | 'qr' | 'saved';
-  label: string;
-  packageText?: string;
-  targetPeerPubkey?: string;
-  tracking?: import('igloo-ui').SharedDistributionTrackingStatus;
 };
 
 type Props = {
@@ -49,7 +44,7 @@ type Props = {
   saveForms: Record<number, SaveDraft>;
   selectedMemberIdx: number | null;
   distributionForms: Record<number, DistributionDraft>;
-  distributionResults: Record<number, DistributionResult>;
+  distributionResults: Record<number, SharedDistributionResult>;
   onChangeCreateForm: (field: 'mode' | 'groupName' | 'threshold' | 'count' | 'sourceProfileId', value: string) => void;
   onChangeRotationSource: (index: number, field: 'packageText' | 'packagePassword', value: string) => void;
   onAddRotationSource: () => void;
@@ -97,16 +92,52 @@ export default function CreatePage({
         ]}
       />
 
-      <CreateFlowGenerateCard
-        form={createForm}
-        availableProfiles={availableProfiles}
-        rotationSources={rotationSources}
-        onChangeForm={onChangeCreateForm}
-        onChangeRotationSource={onChangeRotationSource}
-        onAddRotationSource={onAddRotationSource}
-        onRemoveRotationSource={onRemoveRotationSource}
-        onGenerate={onGenerateFresh}
-      />
+      {availableProfiles.length > 0 ? (
+        <div className="igloo-button-row igloo-button-row-tight" role="group" aria-label="Keyset action mode">
+          <Button
+            type="button"
+            size="sm"
+            variant={createForm.mode === 'new' ? 'default' : 'secondary'}
+            onClick={() => onChangeCreateForm('mode', 'new')}
+          >
+            New Keyset
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={createForm.mode === 'rotate' ? 'default' : 'secondary'}
+            onClick={() => onChangeCreateForm('mode', 'rotate')}
+          >
+            Rotate Existing
+          </Button>
+        </div>
+      ) : null}
+
+      {createForm.mode === 'rotate' ? (
+        // Paper split rotation out of the generate card into its own panel.
+        <RotateKeysetPanel
+          sourceProfileId={createForm.sourceProfileId}
+          availableProfiles={availableProfiles}
+          rotationSources={rotationSources}
+          onChangeSourceProfile={(profileId) => onChangeCreateForm('sourceProfileId', profileId)}
+          onChangeRotationSource={onChangeRotationSource}
+          onAddRotationSource={onAddRotationSource}
+          onRemoveRotationSource={onRemoveRotationSource}
+          onRotate={onGenerateFresh}
+        />
+      ) : (
+        <CreateFlowGenerateCard
+          groupName={createForm.groupName}
+          threshold={createForm.threshold}
+          count={createForm.count}
+          // igloo-home's create form has no `privateKey` (nsec-import) field;
+          // ignore that input from the shared Paper card.
+          onChangeForm={(field, value) => {
+            if (field !== 'privateKey') onChangeCreateForm(field, value);
+          }}
+          onGenerate={onGenerateFresh}
+        />
+      )}
 
       {generatedKeyset ? (
         <section className="igloo-stack">
@@ -157,7 +188,13 @@ export default function CreatePage({
               drafts={distributionForms}
               results={distributionResults}
               onChangeDraft={onChangeDistributionForm}
-              onDistribute={onDistributeShare}
+              onDistribute={(memberIdx, kind) => {
+                // igloo-home supports the package-producing actions; the Paper
+                // status-lifecycle's mark/cancel/revert/prepare are no-ops here.
+                if (kind === 'copy' || kind === 'qr' || kind === 'save') {
+                  onDistributeShare(memberIdx, kind);
+                }
+              }}
               onFinish={onFinishDistribution}
               beforeCards={distributionBeforeCards}
             />

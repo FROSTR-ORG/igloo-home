@@ -17,8 +17,6 @@ import {
   HostFlowShell,
   OperatorDashboardTabs,
   OperatorPermissionsPanel,
-  type OperatorPeerPermissionState,
-  type OperatorPendingOperation,
   OperatorSettingsPanel,
   OperatorSignerPanel,
   PageLayout,
@@ -30,8 +28,14 @@ import {
   type LogEntry,
   type OperatorSignerSettings,
   type PeerPolicy,
-  type SharedDistributionTrackingStatus,
+  type SharedDistributionResult,
 } from 'igloo-ui';
+import {
+  buildPolicyDashboardView,
+  buildSignerDashboardView,
+  type HomePeerPermissionState,
+  type HomePendingOperation,
+} from '@/lib/dashboard-view';
 import {
   applyRotationUpdate,
   connectOnboardingPackage,
@@ -110,7 +114,6 @@ type DistributionResult = {
   label: string;
   packageText: string;
   targetPeerPubkey: string;
-  tracking?: SharedDistributionTrackingStatus;
 };
 
 type RotationDraft = {
@@ -271,7 +274,7 @@ function deriveDistributionResults(
   results: Record<number, DistributionResult>,
   shares: GeneratedKeysetShare[],
   runtimeSnapshot: ProfileRuntimeSnapshot | null,
-) {
+): Record<number, SharedDistributionResult> {
   const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
   const runtimePeers = new Map(
     (runtimeStatus?.peers ?? [])
@@ -294,55 +297,31 @@ function deriveDistributionResults(
       const peer = targetPeerPubkey ? runtimePeers.get(targetPeerPubkey) : null;
       const onboarding = targetPeerPubkey ? onboardingStatuses.get(targetPeerPubkey) : null;
 
-      let tracking = result.tracking ?? { stage: 'waiting_for_device' as const };
-      if (peer?.can_sign) {
-        tracking = {
-          stage: 'sign_ready',
-          updatedAt: peer.last_seen ?? onboarding?.updated_at ?? tracking.updatedAt ?? null,
-        };
-      } else if (peer?.online) {
-        tracking = {
-          stage: 'peer_online',
-          updatedAt: peer.last_seen ?? onboarding?.updated_at ?? tracking.updatedAt ?? null,
-        };
-      } else if (onboarding?.stage === 'handshake_completed') {
-        tracking = {
-          stage: 'handshake_completed',
-          updatedAt: onboarding.updated_at,
-          error: onboarding.error ?? null,
-        };
-      } else if (onboarding?.stage === 'device_contacted_host') {
-        tracking = {
-          stage: 'device_contacted_host',
-          updatedAt: onboarding.updated_at,
-          error: onboarding.error ?? null,
-        };
-      } else if (onboarding?.stage === 'failed') {
-        tracking = {
-          stage: 'failed',
-          updatedAt: onboarding.updated_at,
-          error: onboarding.error ?? null,
-        };
-      }
+      // Paper's status-lifecycle replaces our fine-grained live tracking (which
+      // the reconcile defers everywhere). Keep the most useful signal — a peer
+      // that has come online / completed onboarding maps to `onboarded`; the
+      // rest reflect the local action (`save` → saved, copy/qr → delivered).
+      const onboarded = Boolean(peer?.can_sign) || onboarding?.stage === 'handshake_completed';
+      const status = onboarded ? 'onboarded' : result.kind === 'saved' ? 'saved' : 'delivered';
 
       return [
         memberNumber,
         {
-          ...result,
-          targetPeerPubkey: targetPeerPubkey || result.targetPeerPubkey,
-          tracking,
-        },
+          status,
+          label: result.label,
+          packageText: result.packageText,
+        } satisfies SharedDistributionResult,
       ];
     }),
   );
 }
 
-function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | null): OperatorPeerPermissionState[] {
+function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | null): HomePeerPermissionState[] {
   const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
   const fromRuntime = runtimeStatus?.peer_permission_states;
   if (!Array.isArray(fromRuntime)) return [];
   return fromRuntime
-    .map((policy: RuntimePeerPermissionState): OperatorPeerPermissionState | null => {
+    .map((policy: RuntimePeerPermissionState): HomePeerPermissionState | null => {
       if (typeof policy !== 'object' || policy === null) return null;
       if (typeof policy.pubkey !== 'string') return null;
       const manualOverride = policy.manual_override;
@@ -458,12 +437,12 @@ function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): Pe
   return [...rows.values()].sort((a, b) => a.pubkey.localeCompare(b.pubkey));
 }
 
-function extractPendingOperations(runtimeSnapshot: ProfileRuntimeSnapshot | null): OperatorPendingOperation[] {
+function extractPendingOperations(runtimeSnapshot: ProfileRuntimeSnapshot | null): HomePendingOperation[] {
   const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
   const fromRuntime = runtimeStatus?.pending_operations;
   if (!Array.isArray(fromRuntime)) return [];
   return fromRuntime
-    .map((operation: RuntimePendingOperation): OperatorPendingOperation | null => {
+    .map((operation: RuntimePendingOperation): HomePendingOperation | null => {
       if (!operation || typeof operation !== 'object') return null;
       if (typeof operation.request_id !== 'string' || typeof operation.op_type !== 'string') return null;
       return {
@@ -478,7 +457,7 @@ function extractPendingOperations(runtimeSnapshot: ProfileRuntimeSnapshot | null
           : [],
       };
     })
-    .filter((entry): entry is OperatorPendingOperation => entry !== null);
+    .filter((entry): entry is HomePendingOperation => entry !== null);
 }
 
 function toLogEntries(lines: string[] = []): LogEntry[] {
@@ -635,6 +614,12 @@ export default function App() {
   const runtimePeers = useMemo(() => extractRuntimePeers(runtimeSnapshot), [runtimeSnapshot]);
   const peerPermissionStates = useMemo(() => extractPeerPermissionStates(runtimeSnapshot), [runtimeSnapshot]);
   const pendingOperations = useMemo(() => extractPendingOperations(runtimeSnapshot), [runtimeSnapshot]);
+  // Keyset identity (group/share keys + member index) is surfaced by the live
+  // runtime status metadata, not the persisted profile manifest.
+  const runtimeMetadata = useMemo(
+    () => parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null)?.metadata ?? null,
+    [runtimeSnapshot],
+  );
 
   useEffect(() => {
     setSettingsDraft(detectSettingsDraft(selectedProfile));
@@ -1235,9 +1220,9 @@ export default function App() {
   return (
     <PageLayout maxWidth="max-w-6xl">
       <AppHeader
-        title="Igloo Home"
-        centered
-        subtitle="Desktop operator workspace over the shell-managed FROSTR V2 backend."
+        mode={activeView === 'dashboard' ? 'dashboard' : activeView === 'landing' ? 'welcome' : 'task'}
+        taskLabel="Igloo Home"
+        profileName={selectedProfile?.label}
       />
 
       {busy ? <div className="igloo-message-muted">Working: {busy}</div> : null}
@@ -1256,12 +1241,10 @@ export default function App() {
               profiles={profiles.map((profile) => ({
                 id: profile.id,
                 label: profile.label || 'Unnamed device',
-                subtitle:
-                  activeProfileId === profile.id
-                    ? `${shortProfileId(profile.id)} · signer active`
-                    : shortProfileId(profile.id),
-                statusLabel: activeProfileId === profile.id ? 'Active' : 'Available',
-                loadLabel: activeProfileId === profile.id ? 'Open Dashboard' : 'Load Profile',
+                shortId: shortProfileId(profile.id),
+                state: activeProfileId === profile.id ? 'active' : 'available',
+                primaryActionLabel: activeProfileId === profile.id ? 'Open Dashboard' : 'Load Profile',
+                destructiveActionLabel: 'Delete Profile',
               }))}
               description="Managed desktop profiles remain available while locked. Enter the passphrase below before loading one."
               selectedProfileId={selectedProfileId}
@@ -1398,19 +1381,18 @@ export default function App() {
                   </div>
                 ) : null}
                 <OperatorSignerPanel
-                  profile={{
-                    name: selectedProfile.label,
-                    groupPublicKey:
-                      typeof (runtimeSnapshot?.runtime_status as any)?.group_public_key === 'string'
-                        ? (runtimeSnapshot?.runtime_status as any).group_public_key
-                        : undefined,
-                  }}
+                  view={buildSignerDashboardView({
+                    profileName: selectedProfile.label,
+                    groupPublicKey: runtimeMetadata?.group_public_key,
+                    sharePublicKey: runtimeMetadata?.share_public_key,
+                    memberIdx: runtimeMetadata?.member_idx,
+                    running: Boolean(runtimeSnapshot?.active),
+                    peers: runtimePeers,
+                    pendingOperations,
+                    logLines: runtimeSnapshot?.daemon_log_lines,
+                  })}
                   introMessage="The primary desktop signer should remain running while you distribute and track onboarding packages."
-                  runtimeState={
-                    runtimeSnapshot?.active ? 'running' : busy === 'starting managed profile' ? 'connecting' : 'stopped'
-                  }
                   runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-                  runtimeSummaryLabel={runtimeSnapshot?.active ? 'Signer Running' : 'Signer Stopped'}
                   onPrimaryAction={() =>
                     void (runtimeSnapshot?.active
                       ? handleStopProfileSession()
@@ -1423,9 +1405,6 @@ export default function App() {
                   primaryActionVariant={runtimeSnapshot?.active ? 'destructive' : 'success'}
                   onRefreshPeers={() => void handleRefreshRuntimePeers()}
                   refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
-                  peers={runtimePeers}
-                  pendingOperations={pendingOperations}
-                  logs={toLogEntries(runtimeSnapshot?.daemon_log_lines)}
                 />
               </>
             ) : null}
@@ -1636,24 +1615,18 @@ export default function App() {
 
           {activeDashboardTab === 'signer' ? (
             <OperatorSignerPanel
-              profile={
-                selectedProfile
-                  ? {
-                      name: selectedProfile.label,
-                      groupPublicKey:
-                        typeof (runtimeSnapshot?.runtime_status as any)?.group_public_key === 'string'
-                          ? (runtimeSnapshot?.runtime_status as any).group_public_key
-                          : undefined,
-                    }
-                  : null
-              }
+              view={buildSignerDashboardView({
+                profileName: selectedProfile?.label ?? null,
+                groupPublicKey: runtimeMetadata?.group_public_key,
+                sharePublicKey: runtimeMetadata?.share_public_key,
+                memberIdx: runtimeMetadata?.member_idx,
+                running: Boolean(runtimeSnapshot?.active),
+                peers: runtimePeers,
+                pendingOperations,
+                logLines: runtimeSnapshot?.daemon_log_lines,
+              })}
               introMessage="The desktop signer runs through the shell-managed runtime. This dashboard mirrors the same operator workflow used by the PWA host."
-              runtimeState={
-                runtimeSnapshot?.active ? 'running' : busy === 'starting managed profile' ? 'connecting' : 'stopped'
-              }
               runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-              runtimeSummaryLabel={runtimeSnapshot?.active ? 'Signer Running' : 'Signer Stopped'}
-              runtimeError={error}
               statusBanner={
                 peerRefreshSummary ? (
                   <div
@@ -1684,16 +1657,12 @@ export default function App() {
               primaryActionVariant={runtimeSnapshot?.active ? 'destructive' : 'success'}
               onRefreshPeers={() => void handleRefreshRuntimePeers()}
               refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
-              peers={runtimePeers}
-              pendingOperations={pendingOperations}
-              logs={toLogEntries(runtimeSnapshot?.daemon_log_lines)}
             />
           ) : null}
 
           {activeDashboardTab === 'permissions' ? (
             <OperatorPermissionsPanel
-              peerPermissions={[]}
-              peerPermissionStates={peerPermissionStates}
+              view={buildPolicyDashboardView(peerPermissionStates, Boolean(runtimeSnapshot?.active))}
               peerDescription="Live outbound and inbound peer policy state for the active desktop signer."
               onRefresh={() => void refreshRuntime(selectedProfileId || null)}
             />

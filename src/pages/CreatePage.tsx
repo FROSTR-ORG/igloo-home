@@ -7,6 +7,7 @@ import {
   CreateFlowLocalSaveCard,
   CreateFlowTaskBanner,
   RotateKeysetPanel,
+  type SharedDistributionAction,
   type SharedDistributionResult,
 } from 'igloo-ui';
 
@@ -53,7 +54,7 @@ type Props = {
   onChangeSaveForm: (memberIdx: number, field: keyof SaveDraft, value: string) => void;
   onSaveGeneratedProfile: (share: GeneratedKeysetShare) => void;
   onChangeDistributionForm: (memberIdx: number, field: keyof DistributionDraft, value: string) => void;
-  onDistributeShare: (memberIdx: number, kind: 'copy' | 'qr' | 'save') => void;
+  onDistributeShare: (memberIdx: number, kind: SharedDistributionAction) => void;
   onFinishDistribution: () => void;
   distributionBeforeCards?: ReactNode;
 };
@@ -188,13 +189,7 @@ export default function CreatePage({
               drafts={distributionForms}
               results={distributionResults}
               onChangeDraft={onChangeDistributionForm}
-              onDistribute={(memberIdx, kind) => {
-                // igloo-home supports the package-producing actions; the Paper
-                // status-lifecycle's mark/cancel/revert/prepare are no-ops here.
-                if (kind === 'copy' || kind === 'qr' || kind === 'save') {
-                  onDistributeShare(memberIdx, kind);
-                }
-              }}
+              onDistribute={onDistributeShare}
               onFinish={onFinishDistribution}
               beforeCards={distributionBeforeCards}
             />

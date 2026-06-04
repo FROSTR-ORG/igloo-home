@@ -28,7 +28,9 @@ import {
   type LogEntry,
   type OperatorSignerSettings,
   type PeerPolicy,
+  type SharedDistributionAction,
   type SharedDistributionResult,
+  type SharedDistributionStatus,
 } from 'igloo-ui';
 import {
   buildPolicyDashboardView,
@@ -110,7 +112,7 @@ type DistributionDraft = {
 };
 
 type DistributionResult = {
-  kind: 'copied' | 'qr' | 'saved';
+  status: SharedDistributionStatus;
   label: string;
   packageText: string;
   targetPeerPubkey: string;
@@ -297,12 +299,11 @@ function deriveDistributionResults(
       const peer = targetPeerPubkey ? runtimePeers.get(targetPeerPubkey) : null;
       const onboarding = targetPeerPubkey ? onboardingStatuses.get(targetPeerPubkey) : null;
 
-      // Paper's status-lifecycle replaces our fine-grained live tracking (which
-      // the reconcile defers everywhere). Keep the most useful signal — a peer
-      // that has come online / completed onboarding maps to `onboarded`; the
-      // rest reflect the local action (`save` → saved, copy/qr → delivered).
+      // The result already carries a Paper status-lifecycle stage; promote it to
+      // `onboarded` once the live runtime shows the peer online / handshake done
+      // (fine-grained per-stage tracking stays deferred by the reconcile).
       const onboarded = Boolean(peer?.can_sign) || onboarding?.stage === 'handshake_completed';
-      const status = onboarded ? 'onboarded' : result.kind === 'saved' ? 'saved' : 'delivered';
+      const status: SharedDistributionStatus = onboarded ? 'onboarded' : result.status;
 
       return [
         memberNumber,
@@ -918,52 +919,94 @@ export default function App() {
     setActiveView('create');
   }
 
-  async function handleDistributeGeneratedShare(memberIdx: number, kind: 'copy' | 'qr' | 'save') {
+  async function handleDistributeGeneratedShare(memberIdx: number, action: SharedDistributionAction) {
     if (!generatedKeyset || selectedGeneratedShareIdx == null) {
       throw new Error('Save the local profile before distributing remaining shares.');
     }
-    const distribution = distributionForms[memberIdx];
-    if (!distribution?.label.trim()) {
-      throw new Error('share label is required');
+    const existing = distributionResults[memberIdx];
+
+    const writeResult = (next: DistributionResult | null) => {
+      setDistributionResults((current) => {
+        const updated = { ...current };
+        if (next) {
+          updated[memberIdx] = next;
+        } else {
+          delete updated[memberIdx];
+        }
+        return updated;
+      });
+      // Discarding the package also clears any QR still showing it.
+      if (next == null && existing?.packageText) {
+        setDistributionQr((qr) => (qr?.packageText === existing.packageText ? null : qr));
+      }
+    };
+
+    // Status-only transitions that operate on the already-prepared package.
+    if (action === 'mark') {
+      if (!existing) throw new Error('Create the onboarding package before marking it delivered.');
+      writeResult({ ...existing, status: 'delivered' });
+      return;
     }
-    if (!distribution.packagePassword || distribution.packagePassword !== distribution.confirmPassword) {
-      throw new Error('package password confirmation does not match');
+    if (action === 'revert') {
+      if (!existing) throw new Error('No distributed share to revert.');
+      writeResult({ ...existing, status: 'packaged' });
+      return;
     }
-    const localDraft = saveForms[selectedGeneratedShareIdx];
-    const localShare = generatedKeyset.shares.find((share) => share.member_idx === selectedGeneratedShareIdx);
-    const targetShare = generatedKeyset.shares.find((share) => share.member_idx === memberIdx);
-    if (!localDraft || !localShare || !targetShare) {
-      throw new Error('generated share context is incomplete');
+    if (action === 'cancel') {
+      writeResult(null);
+      return;
     }
-    const packageText = await run('creating onboarding package', () =>
-      createGeneratedOnboardingPackage({
-        sharePackageJson: targetShare.share_package_json,
-        relayUrls: splitTextarea(localDraft.relayUrls),
-        peerPubkey: localShare.share_public_key,
-        packagePassword: distribution.packagePassword,
-      }),
-    );
-    if (kind === 'copy' && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(packageText);
-    }
-    if (kind === 'qr') {
-      setDistributionQr({ label: distribution.label, packageText });
-    }
-    if (kind === 'save') {
-      downloadText(`${distribution.label || `member-${memberIdx}`}-bfonboard.txt`, packageText);
-    }
-    setDistributionResults((current) => ({
-      ...current,
-      [memberIdx]: {
-        kind: kind === 'copy' ? 'copied' : kind === 'save' ? 'saved' : 'qr',
+
+    if (action === 'prepare') {
+      const distribution = distributionForms[memberIdx];
+      if (!distribution?.label.trim()) {
+        throw new Error('share label is required');
+      }
+      if (!distribution.packagePassword || distribution.packagePassword !== distribution.confirmPassword) {
+        throw new Error('package password confirmation does not match');
+      }
+      const localDraft = saveForms[selectedGeneratedShareIdx];
+      const localShare = generatedKeyset.shares.find((share) => share.member_idx === selectedGeneratedShareIdx);
+      const targetShare = generatedKeyset.shares.find((share) => share.member_idx === memberIdx);
+      if (!localDraft || !localShare || !targetShare) {
+        throw new Error('generated share context is incomplete');
+      }
+      const packageText = await run('creating onboarding package', () =>
+        createGeneratedOnboardingPackage({
+          sharePackageJson: targetShare.share_package_json,
+          relayUrls: splitTextarea(localDraft.relayUrls),
+          peerPubkey: localShare.share_public_key,
+          packagePassword: distribution.packagePassword,
+        }),
+      );
+      writeResult({
+        status: 'packaged',
         label: distribution.label,
         packageText,
         targetPeerPubkey: targetShare.share_public_key,
-        tracking: {
-          stage: 'waiting_for_device',
-        },
-      },
-    }));
+      });
+      return;
+    }
+
+    // copy / qr / save operate on the package built by `prepare`.
+    if (!existing?.packageText) {
+      throw new Error('Create the onboarding package before sharing it.');
+    }
+    if (action === 'copy') {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(existing.packageText);
+      }
+      return;
+    }
+    if (action === 'qr') {
+      setDistributionQr({ label: existing.label, packageText: existing.packageText });
+      return;
+    }
+    if (action === 'save') {
+      downloadText(`${existing.label || `member-${memberIdx}`}-bfonboard.txt`, existing.packageText);
+      writeResult({ ...existing, status: 'saved' });
+      return;
+    }
   }
 
   function handleFinishDistribution() {

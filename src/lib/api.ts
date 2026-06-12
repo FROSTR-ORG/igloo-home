@@ -9,6 +9,7 @@ import type {
   ProfileManifest,
   ProfilePackageExportResult,
   ProfileRuntimeSnapshot,
+  RecoveredGroupKey,
   RelayProfile,
   RuntimePeerRefreshResult,
   SignerLogEntry,
@@ -200,20 +201,22 @@ export function importProfileFromBfprofile(input: {
   }).catch(rethrowHomeError);
 }
 
-export function recoverProfileFromBfshare(input: {
-  label?: string;
-  relayProfile?: string | null;
-  passphrase: string;
-  packagePassword: string;
-  packageText: string;
+export function recoverGroupKey(input: {
+  profileId: string;
+  devicePassphrase: string;
+  sources: Array<{
+    packageText: string;
+    packagePassword: string;
+  }>;
 }) {
-  return invoke<ProfileImportResult>('recover_profile_from_bfshare_command', {
+  return invoke<RecoveredGroupKey>('recover_group_key_command', {
     input: {
-      label: input.label ?? null,
-      relay_profile: input.relayProfile ?? null,
-      passphrase: input.passphrase,
-      package_password: input.packagePassword,
-      package: input.packageText,
+      profile_id: input.profileId,
+      device_passphrase: input.devicePassphrase,
+      sources: input.sources.map((source) => ({
+        package: source.packageText,
+        package_password: source.packagePassword,
+      })),
     },
   }).catch(rethrowHomeError);
 }
@@ -265,6 +268,7 @@ export function createGeneratedKeyset(groupName: string, threshold: number, coun
 export function createRotatedKeyset(input: {
   threshold: number;
   count: number;
+  sourceProfileId: string;
   sources: Array<{
     packageText: string;
     packagePassword: string;
@@ -274,6 +278,7 @@ export function createRotatedKeyset(input: {
     input: {
       threshold: input.threshold,
       count: input.count,
+      source_profile_id: input.sourceProfileId,
       sources: input.sources.map((source) => ({
         package: source.packageText,
         package_password: source.packagePassword,

@@ -1,26 +1,22 @@
 use std::fs;
 use std::path::Path;
 
+use crate::models::{ConnectedOnboardingPreview, DiscardConnectedOnboardingResult};
+use crate::session::{AppState, PendingOnboardingState};
 use anyhow::{Context, Result, bail};
 use bifrost_app::native_runtime;
-use bifrost_core::secret::Passphrase;
+pub use bifrost_app::native_runtime::{ConnectedOnboardingImport, DaemonMetadata};
 use bifrost_app::runtime::AppOptions;
 use bifrost_app::runtime::ResolvedAppConfig;
+use bifrost_core::secret::Passphrase;
 use bifrost_profile::{
     FilesystemProfileDomain, FilesystemProfileManifestStore, FilesystemRelayProfileStore,
     ProfileManifestStore, ProfilePaths, RelayProfileStore, load_shell_config_file,
     save_shell_config_file,
 };
-use frostr_utils::BfProfilePayload;
-
-use crate::models::{ConnectedOnboardingPreview, DiscardConnectedOnboardingResult};
-use crate::session::{AppState, PendingOnboardingState};
-pub use bifrost_app::native_runtime::{
-    ConnectedOnboardingImport, DaemonMetadata,
-};
 pub use bifrost_profile::{
-    ProfileBackupPublishResult, ProfileExportResult, ProfileImportResult, ProfileManifest,
-    ProfilePackageExportResult, ProfilePreview, RelayProfile,
+    ProfileExportResult, ProfileImportResult, ProfileManifest, ProfilePackageExportResult,
+    RelayProfile,
 };
 pub type ShellPaths = ProfilePaths;
 
@@ -50,8 +46,8 @@ pub fn list_managed_profiles(paths: &ShellPaths) -> Result<Vec<ProfileManifest>>
     }
 
     let mut profiles = Vec::new();
-    for entry in
-        fs::read_dir(&paths.profiles_dir).with_context(|| format!("read {}", paths.profiles_dir.display()))?
+    for entry in fs::read_dir(&paths.profiles_dir)
+        .with_context(|| format!("read {}", paths.profiles_dir.display()))?
     {
         let entry = entry?;
         let path = entry.path();
@@ -130,18 +126,18 @@ pub fn daemon_log_path_for_profile(paths: &ShellPaths, profile_id: &str) -> std:
     native_runtime::daemon_log_path(paths, profile_id)
 }
 
-pub async fn preview_bfshare_recovery_package(
-    package_raw: &str,
-    package_password: Passphrase,
-) -> Result<(ProfilePreview, BfProfilePayload)> {
-    // bifrost-profile's package-password API still takes an owned `String`;
-    // borrow the secret here without producing an extra long-lived owned copy.
-    bifrost_profile::preview_bfshare_recovery(
-        package_raw,
-        package_password.expose_secret().to_string(),
-        None,
-    )
-    .await
+/// Read a profile's group package from its plaintext `group_ref` file. The
+/// group package carries no secrets (member pubkeys + group public key), so
+/// this needs no passphrase — it supplies the member indices for relay-free
+/// keyset rotation.
+pub fn read_profile_group_package(
+    paths: &ShellPaths,
+    profile_id: &str,
+) -> Result<bifrost_core::types::GroupPackage> {
+    let profile = read_managed_profile(paths, profile_id)?;
+    let group_raw = fs::read_to_string(&profile.group_ref)
+        .with_context(|| format!("read {}", profile.group_ref))?;
+    bifrost_codec::parse_group_package(&group_raw).context("parse profile group package")
 }
 
 pub async fn apply_rotation_update(
@@ -296,27 +292,6 @@ pub fn import_profile_from_bfprofile(
     )
 }
 
-pub async fn recover_profile_from_bfshare(
-    paths: &ShellPaths,
-    label: Option<String>,
-    relay_profile: Option<String>,
-    passphrase: Option<Passphrase>,
-    package_password: Passphrase,
-    package_raw: &str,
-) -> Result<ProfileImportResult> {
-    paths.ensure()?;
-    bifrost_profile::recover_profile_from_bfshare_value(
-        paths,
-        package_raw.trim(),
-        // bifrost still takes the package password as an owned `String`.
-        package_password.expose_secret().trim().to_string(),
-        label,
-        relay_profile,
-        passphrase,
-    )
-    .await
-}
-
 pub fn export_managed_profile(
     paths: &ShellPaths,
     profile_id: &str,
@@ -357,16 +332,6 @@ pub fn export_managed_profile_package(
         ),
         _ => bail!("unsupported export format {format}; expected bfprofile or bfshare"),
     }
-}
-
-pub async fn publish_managed_profile_backup(
-    paths: &ShellPaths,
-    profile_id: &str,
-    passphrase: Option<Passphrase>,
-) -> Result<ProfileBackupPublishResult> {
-    paths.ensure()?;
-    // bifrost borrows the passphrase here.
-    bifrost_profile::publish_profile_backup(paths, profile_id, passphrase.as_ref()).await
 }
 
 pub fn remove_managed_profile(paths: &ShellPaths, profile_id: &str) -> Result<()> {
@@ -496,6 +461,7 @@ mod tests {
     use crate::session::{PendingOnboardingState, make_app_state};
     use bifrost_app::onboarding::{BootstrapImportResult, BootstrapStateSnapshot};
     use bifrost_core::types::DerivedPublicNonce;
+    use bifrost_profile::ProfilePreview;
     use bifrost_signer::{DeviceState, DeviceStatePersisted};
     use frostr_utils::{CreateKeysetConfig, create_keyset};
 
@@ -706,13 +672,9 @@ mod tests {
             "wss://relay.one.example".to_string(),
             "wss://relay.two.example".to_string(),
         ];
-        let created = resolve_or_create_relay_profile(
-            &shell_paths,
-            None,
-            Some("Desktop"),
-            &relay_urls,
-        )
-        .expect("create relay profile");
+        let created =
+            resolve_or_create_relay_profile(&shell_paths, None, Some("Desktop"), &relay_urls)
+                .expect("create relay profile");
         let reused = resolve_or_create_relay_profile(
             &shell_paths,
             None,
@@ -723,7 +685,10 @@ mod tests {
 
         assert_eq!(created, reused);
         let config = load_shell_config_file(&shell_paths.config_path).expect("load shell config");
-        assert_eq!(config.default_relay_profile_id.as_deref(), Some(created.as_str()));
+        assert_eq!(
+            config.default_relay_profile_id.as_deref(),
+            Some(created.as_str())
+        );
         let relays = list_relay_profiles_managed(&shell_paths).expect("list relay profiles");
         assert_eq!(relays.len(), 1);
         assert_eq!(relays[0].id, created);

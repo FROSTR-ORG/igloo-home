@@ -134,11 +134,10 @@ export type ProfilePackageExportResult = {
   package: string;
 };
 
-export type ProfileBackupPublishResult = {
-  profile_id: string;
-  relays: string[];
-  event_id: string;
-  author_pubkey: string;
+export type RecoveredGroupKey = {
+  nsec: string;
+  signing_key_hex: string;
+  group_public_key: string;
 };
 
 export type ProfileRuntimeSnapshot = {

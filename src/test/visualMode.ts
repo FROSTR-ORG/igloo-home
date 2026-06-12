@@ -63,7 +63,6 @@ type VisualScenarioState = {
     onboardingPackage: string;
     onboardingPassword: string;
   };
-  loadMode: 'bfprofile' | 'bfshare';
   loadForm: {
     label: string;
     passphrase: string;
@@ -221,7 +220,6 @@ const baseState: VisualScenarioState = {
       source: 'bfonboard',
     },
   },
-  loadMode: 'bfprofile',
   loadForm: {
     label: 'Recovered Desktop',
     passphrase: 'visual-preview-pass',
@@ -250,7 +248,7 @@ export function resolveVisualScenario(): VisualScenarioState | null {
     case 'landing-seeded':
       return { ...baseState, activeView: 'landing' };
     case 'load':
-      return { ...baseState, activeView: 'load', loadMode: 'bfprofile' };
+      return { ...baseState, activeView: 'load' };
     case 'onboard-connect':
       return { ...baseState, activeView: 'onboard-connect', pendingOnboardConnection: null };
     case 'onboard-save':

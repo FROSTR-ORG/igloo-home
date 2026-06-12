@@ -7,8 +7,7 @@ use crate::models::{
     CreateKeysetRequest, ExportProfileInput, ExportProfilePackageInput,
     FinalizeConnectedOnboardingInput, ImportProfileFromBfprofileInput,
     ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
-    PublishProfileBackupInput, RecoverProfileFromBfshareInput, RemoveProfileInput,
-    RotateKeysetRequest, StartProfileSessionRequest,
+    RecoverGroupKeyInput, RemoveProfileInput, RotateKeysetRequest, StartProfileSessionRequest,
 };
 use crate::{app, session};
 
@@ -55,13 +54,6 @@ fn dispatch_app_free_command(command: &str, input: Value) -> anyhow::Result<Opti
                 .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
             )
         }
-        "create_rotated_keyset" => {
-            let input: RotateKeysetRequest = serde_json::from_value(input)?;
-            Some(
-                tauri::async_runtime::block_on(app::commands::create_rotated_keyset(input))
-                    .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
-            )
-        }
         "create_generated_onboarding_package" => {
             let input: CreateGeneratedOnboardingPackageInput = serde_json::from_value(input)?;
             Some(
@@ -88,14 +80,14 @@ fn dispatch_profile_command(
                 | "import_profile_from_raw"
                 | "import_profile_from_onboarding"
                 | "import_profile_from_bfprofile"
-                | "recover_profile_from_bfshare"
+                | "recover_group_key"
                 | "connect_onboarding_package"
                 | "finalize_connected_onboarding"
                 | "discard_connected_onboarding"
                 | "remove_profile"
                 | "export_profile"
                 | "export_profile_package"
-                | "publish_profile_backup"
+                | "create_rotated_keyset"
                 | "apply_rotation_update"
                 | "list_session_logs"
                 | "navigate_view"
@@ -144,14 +136,18 @@ fn dispatch_profile_command(
                     .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
             )
         }
-        "recover_profile_from_bfshare" => {
-            let input: RecoverProfileFromBfshareInput = serde_json::from_value(input)?;
+        "recover_group_key" => {
+            let input: RecoverGroupKeyInput = serde_json::from_value(input)?;
             Some(
-                tauri::async_runtime::block_on(app::commands::recover_profile_from_bfshare(
-                    state.inner(),
-                    input,
-                ))
-                .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+                app::commands::recover_group_key(state.inner(), input)
+                    .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+            )
+        }
+        "create_rotated_keyset" => {
+            let input: RotateKeysetRequest = serde_json::from_value(input)?;
+            Some(
+                app::commands::create_rotated_keyset(state.inner(), input)
+                    .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
             )
         }
         "connect_onboarding_package" => {
@@ -194,16 +190,6 @@ fn dispatch_profile_command(
             Some(
                 app::commands::export_profile_package(state.inner(), input)
                     .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
-            )
-        }
-        "publish_profile_backup" => {
-            let input: PublishProfileBackupInput = serde_json::from_value(input)?;
-            Some(
-                tauri::async_runtime::block_on(app::commands::publish_profile_backup(
-                    state.inner(),
-                    input,
-                ))
-                .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
             )
         }
         "apply_rotation_update" => {
@@ -328,8 +314,7 @@ const EXPECTED_DISPATCH_COMMANDS: &[&str] = &[
     "list_session_logs",
     "navigate_view",
     "profile_runtime_snapshot",
-    "publish_profile_backup",
-    "recover_profile_from_bfshare",
+    "recover_group_key",
     "refresh_runtime_peers",
     "remove_profile",
     "start_profile_session",

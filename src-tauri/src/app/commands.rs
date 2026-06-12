@@ -12,9 +12,9 @@ use crate::models::{
     CreateGeneratedOnboardingPackageInput, DiscardConnectedOnboardingResult, ExportProfileInput,
     ExportProfilePackageInput, FinalizeConnectedOnboardingInput, ImportProfileFromBfprofileInput,
     ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
-    ProfileRuntimeSnapshot, PublishProfileBackupInput, RecoverProfileFromBfshareInput,
-    RemoveProfileInput, ResolveCloseRequestInput, RotateKeysetRequest, RuntimePeerRefreshFailure,
-    RuntimePeerRefreshResult, StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
+    ProfileRuntimeSnapshot, RecoverGroupKeyInput, RemoveProfileInput, ResolveCloseRequestInput,
+    RotateKeysetRequest, RuntimePeerRefreshFailure, RuntimePeerRefreshResult,
+    StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
 };
 use crate::profiles;
 use crate::session::{self, AppState};
@@ -101,19 +101,16 @@ pub fn import_profile_from_bfprofile(
     )
 }
 
-pub async fn recover_profile_from_bfshare(
+pub fn recover_group_key(
     state: &AppState,
-    input: RecoverProfileFromBfshareInput,
-) -> Result<profiles::ProfileImportResult> {
-    profiles::recover_profile_from_bfshare(
+    input: RecoverGroupKeyInput,
+) -> Result<crate::models::RecoveredGroupKey> {
+    session::recover_group_key_from_shares(
         &state.shell_paths,
-        input.label,
-        input.relay_profile,
-        Some(input.passphrase),
-        input.package_password,
-        &input.package,
+        &input.profile_id,
+        input.device_passphrase,
+        input.sources,
     )
-    .await
 }
 
 pub async fn apply_rotation_update(
@@ -160,19 +157,6 @@ pub fn export_profile_package(
     Ok(project_profile_package_export_result(result))
 }
 
-pub async fn publish_profile_backup(
-    state: &AppState,
-    input: PublishProfileBackupInput,
-) -> Result<crate::models::ProfileBackupPublishResult> {
-    let result = profiles::publish_managed_profile_backup(
-        &state.shell_paths,
-        &input.profile_id,
-        Some(input.passphrase),
-    )
-    .await?;
-    Ok(project_profile_backup_publish_result(result))
-}
-
 pub fn update_profile_operator_settings(
     state: &AppState,
     input: UpdateProfileOperatorSettingsInput,
@@ -194,10 +178,17 @@ pub fn create_generated_keyset(
     session::make_generated_keyset(group_name, threshold, count)
 }
 
-pub async fn create_rotated_keyset(
+pub fn create_rotated_keyset(
+    state: &AppState,
     input: RotateKeysetRequest,
 ) -> Result<crate::models::GeneratedKeyset> {
-    session::make_rotated_keyset(input.threshold, input.count, input.sources).await
+    session::make_rotated_keyset(
+        &state.shell_paths,
+        input.threshold,
+        input.count,
+        &input.source_profile_id,
+        input.sources,
+    )
 }
 
 pub fn create_generated_onboarding_package(
@@ -327,17 +318,6 @@ fn project_profile_package_export_result(
     }
 }
 
-fn project_profile_backup_publish_result(
-    result: profiles::ProfileBackupPublishResult,
-) -> crate::models::ProfileBackupPublishResult {
-    crate::models::ProfileBackupPublishResult {
-        profile_id: result.profile_id,
-        relays: result.relays,
-        event_id: result.event_id,
-        author_pubkey: result.author_pubkey,
-    }
-}
-
 #[tauri::command]
 pub async fn app_paths_command(
     state: State<'_, AppState>,
@@ -407,11 +387,11 @@ pub async fn import_profile_from_bfprofile_command(
 }
 
 #[tauri::command]
-pub async fn recover_profile_from_bfshare_command(
+pub async fn recover_group_key_command(
     state: State<'_, AppState>,
-    input: RecoverProfileFromBfshareInput,
-) -> std::result::Result<profiles::ProfileImportResult, HomeError> {
-    Ok(recover_profile_from_bfshare(state.inner(), input).await?)
+    input: RecoverGroupKeyInput,
+) -> std::result::Result<crate::models::RecoveredGroupKey, HomeError> {
+    Ok(recover_group_key(state.inner(), input)?)
 }
 
 #[tauri::command]
@@ -472,14 +452,6 @@ pub async fn export_profile_package_command(
 }
 
 #[tauri::command]
-pub async fn publish_profile_backup_command(
-    state: State<'_, AppState>,
-    input: PublishProfileBackupInput,
-) -> std::result::Result<crate::models::ProfileBackupPublishResult, HomeError> {
-    Ok(publish_profile_backup(state.inner(), input).await?)
-}
-
-#[tauri::command]
 pub async fn update_profile_operator_settings_command(
     state: State<'_, AppState>,
     input: UpdateProfileOperatorSettingsInput,
@@ -500,9 +472,10 @@ pub async fn create_generated_keyset_command(
 
 #[tauri::command]
 pub async fn create_rotated_keyset_command(
+    state: State<'_, AppState>,
     input: RotateKeysetRequest,
 ) -> std::result::Result<crate::models::GeneratedKeyset, HomeError> {
-    Ok(create_rotated_keyset(input).await?)
+    Ok(create_rotated_keyset(state.inner(), input)?)
 }
 
 #[tauri::command]
@@ -737,19 +710,5 @@ mod tests {
         assert_eq!(result.format, "bfprofile");
         assert_eq!(result.out_path, Some("/tmp/profile.bfprofile".to_string()));
         assert_eq!(result.package, "package-data");
-    }
-
-    #[test]
-    fn project_profile_backup_publish_result_preserves_wire_shape() {
-        let result = project_profile_backup_publish_result(profiles::ProfileBackupPublishResult {
-            profile_id: "profile-1".to_string(),
-            relays: vec!["ws://127.0.0.1:8194".to_string()],
-            event_id: "event-1".to_string(),
-            author_pubkey: "pubkey-1".to_string(),
-        });
-        assert_eq!(result.profile_id, "profile-1");
-        assert_eq!(result.relays, vec!["ws://127.0.0.1:8194".to_string()]);
-        assert_eq!(result.event_id, "event-1");
-        assert_eq!(result.author_pubkey, "pubkey-1");
     }
 }

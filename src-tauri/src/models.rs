@@ -40,6 +40,10 @@ pub struct RotationSourceInput {
 pub struct RotateKeysetRequest {
     pub threshold: u16,
     pub count: u16,
+    // The local profile whose (plaintext) group package supplies the member
+    // indices for the source shares — the new model has no relay backup to
+    // recover the group from, so it comes from a profile the operator holds.
+    pub source_profile_id: String,
     pub sources: Vec<RotationSourceInput>,
 }
 
@@ -133,15 +137,23 @@ pub struct ImportProfileFromBfprofileInput {
 }
 
 // Secret-bearing IPC input; see note above. Deserialize-only.
+//
+// The device passphrase unlocks the recovering profile's own share so it counts
+// toward the threshold; `sources` are the other members' password-sealed
+// bfshares. Reconstruction is fully local — no relay.
 #[derive(Debug, Deserialize)]
-pub struct RecoverProfileFromBfshareInput {
-    pub label: Option<String>,
-    pub relay_profile: Option<String>,
+pub struct RecoverGroupKeyInput {
+    pub profile_id: String,
     #[serde(deserialize_with = "deserialize_passphrase")]
-    pub passphrase: Passphrase,
-    #[serde(deserialize_with = "deserialize_passphrase")]
-    pub package_password: Passphrase,
-    pub package: String,
+    pub device_passphrase: Passphrase,
+    pub sources: Vec<RotationSourceInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveredGroupKey {
+    pub nsec: String,
+    pub signing_key_hex: String,
+    pub group_public_key: String,
 }
 
 // Secret-bearing IPC input; see note above. Deserialize-only.
@@ -186,22 +198,6 @@ pub struct ProfilePackageExportResult {
     pub format: String,
     pub out_path: Option<String>,
     pub package: String,
-}
-
-// Secret-bearing IPC input; see note above. Deserialize-only.
-#[derive(Debug, Deserialize)]
-pub struct PublishProfileBackupInput {
-    pub profile_id: String,
-    #[serde(deserialize_with = "deserialize_passphrase")]
-    pub passphrase: Passphrase,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProfileBackupPublishResult {
-    pub profile_id: String,
-    pub relays: Vec<String>,
-    pub event_id: String,
-    pub author_pubkey: String,
 }
 
 // Secret-bearing IPC input; see note above. Deserialize-only.

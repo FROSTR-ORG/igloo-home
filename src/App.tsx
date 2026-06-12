@@ -22,6 +22,8 @@ import {
   PageLayout,
   ProfileConfirmationCard,
   QrPayloadModal,
+  RecoverCollectSharesPanel,
+  SensitiveTextarea,
   StepProgress,
   StoredProfilesLandingCard,
   Textarea,
@@ -31,6 +33,7 @@ import {
   type SharedDistributionAction,
   type SharedDistributionResult,
   type SharedDistributionStatus,
+  type SharedRecoverSource,
 } from 'igloo-ui';
 import {
   buildPolicyDashboardView,
@@ -54,7 +57,7 @@ import {
   listRelayProfiles,
   profileRuntimeSnapshot,
   refreshRuntimePeers,
-  recoverProfileFromBfshare,
+  recoverGroupKey,
   removeProfile,
   resolveCloseRequest,
   startProfileSession,
@@ -81,6 +84,7 @@ import type {
   ProfileImportResult,
   ProfileManifest,
   ProfileRuntimeSnapshot,
+  RecoveredGroupKey,
   RelayProfile,
   RuntimePeerRefreshResult,
   SignerLifecycleEvent,
@@ -91,7 +95,14 @@ import { installTestBridge } from '@/lib/testBridge';
 import { resolveVisualScenario } from '@/test/visualMode';
 import CreatePage from '@/pages/CreatePage';
 
-type ViewKey = 'landing' | 'create' | 'load' | 'onboard-connect' | 'onboard-save' | 'dashboard';
+type ViewKey =
+  | 'landing'
+  | 'create'
+  | 'load'
+  | 'recover-key'
+  | 'onboard-connect'
+  | 'onboard-save'
+  | 'dashboard';
 type DashboardTab = 'signer' | 'permissions' | 'settings';
 
 type SaveDraft = {
@@ -582,7 +593,6 @@ export default function App() {
       onboardingPassword: '',
     },
   );
-  const [loadMode, setLoadMode] = useState<'bfprofile' | 'bfshare'>(visualScenario?.loadMode ?? 'bfprofile');
   const [loadForm, setLoadForm] = useState(
     visualScenario?.loadForm ?? {
       label: '',
@@ -591,6 +601,15 @@ export default function App() {
       packageText: '',
     },
   );
+  // Recover the group secret key (nsec) from a threshold of shares: the selected
+  // local profile contributes its own share (unlocked with the device
+  // passphrase) plus the pasted bfshares. Fully local — no relay.
+  const [recoverProfileId, setRecoverProfileId] = useState('');
+  const [recoverDevicePassphrase, setRecoverDevicePassphrase] = useState('');
+  const [recoverSources, setRecoverSources] = useState<SharedRecoverSource[]>([
+    { packageText: '', packagePassword: '' },
+  ]);
+  const [recoveredKey, setRecoveredKey] = useState<RecoveredGroupKey | null>(null);
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ProfileRuntimeSnapshot | null>(
     visualScenario?.runtimeSnapshot ?? null,
   );
@@ -829,6 +848,9 @@ export default function App() {
     if (!groupName) {
       throw new Error('group name is required');
     }
+    if (createForm.mode === 'rotate' && !createForm.sourceProfileId) {
+      throw new Error('select the source profile whose keyset you are rotating');
+    }
     const generated = await run(
       createForm.mode === 'rotate' ? 'rotating keyset' : 'generating keyset',
       () =>
@@ -836,6 +858,7 @@ export default function App() {
           ? createRotatedKeyset({
               threshold,
               count,
+              sourceProfileId: createForm.sourceProfileId,
               sources: rotationSources.map((source) => ({
                 packageText: source.packageText,
                 packagePassword: source.packagePassword,
@@ -1061,22 +1084,15 @@ export default function App() {
   }
 
   async function handleLoadPackage() {
-    const result = await run(
-      loadMode === 'bfprofile' ? 'importing bfprofile' : 'recovering bfshare',
-      () =>
-        loadMode === 'bfprofile'
-          ? importProfileFromBfprofile({
-              label: loadForm.label || undefined,
-              passphrase: loadForm.passphrase,
-              packagePassword: loadForm.packagePassword,
-              packageText: loadForm.packageText,
-            })
-          : recoverProfileFromBfshare({
-              label: loadForm.label || undefined,
-              passphrase: loadForm.passphrase,
-              packagePassword: loadForm.packagePassword,
-              packageText: loadForm.packageText,
-            }),
+    // Restoring a lost device = importing its self-contained `bfprofile`. A bare
+    // `bfshare` can no longer rebuild a device (it carries no group package).
+    const result = await run('importing bfprofile', () =>
+      importProfileFromBfprofile({
+        label: loadForm.label || undefined,
+        passphrase: loadForm.passphrase,
+        packagePassword: loadForm.packagePassword,
+        packageText: loadForm.packageText,
+      }),
     );
     const profile = unwrapImportedProfile(result);
     setPassphrase(loadForm.passphrase);
@@ -1084,6 +1100,29 @@ export default function App() {
     setSelectedProfileId(profile.id);
     setActiveView('dashboard');
     setActiveDashboardTab('signer');
+  }
+
+  function updateRecoverSource(index: number, field: 'packageText' | 'packagePassword', value: string) {
+    setRecoverSources((current) =>
+      current.map((source, sourceIndex) =>
+        sourceIndex === index ? { ...source, [field]: value } : source,
+      ),
+    );
+  }
+
+  async function handleRecoverGroupKey() {
+    if (!recoverProfileId) {
+      throw new Error('select a local profile to supply the group package');
+    }
+    const recovered = await run('recovering group key', () =>
+      recoverGroupKey({
+        profileId: recoverProfileId,
+        devicePassphrase: recoverDevicePassphrase,
+        sources: recoverSources.filter((source) => source.packageText.trim().length > 0),
+      }),
+    );
+    setRecoveredKey(recovered);
+    setNotice('Group secret key recovered locally. Copy it somewhere safe, then clear this screen.');
   }
 
   async function handleRotateKey() {
@@ -1331,10 +1370,21 @@ export default function App() {
               <HostEntryTile
                 kicker="Existing device"
                 title="Load Profile"
-                description="Import a full `bfprofile` package or recover a device from a protected `bfshare`."
+                description="Import a full `bfprofile` package to restore a desktop device into the local store."
                 actionLabel="Load Profile"
                 onAction={() => setActiveView('load')}
                 icon={<svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.97 3.06 8.77 8 10 4.94-1.23 8-5.03 8-10V7l-8-4Z" /><path d="M12 8v6m0 0 3-3m-3 3-3-3" /></svg>}
+              />
+              <HostEntryTile
+                kicker="Threshold of shares"
+                title="Recover Group Key"
+                description="Reconstruct the group secret key (nsec) locally from a threshold of shares — this device plus pasted `bfshare`s. No relay."
+                actionLabel="Recover Key"
+                onAction={() => {
+                  setRecoveredKey(null);
+                  setActiveView('recover-key');
+                }}
+                icon={<svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 1 1 9.74 1.58L21 15v2h-2v2h-2v2h-3v-3.17a5 5 0 0 1-7-4.83Z" /><circle cx="10" cy="10" r="1.25" /></svg>}
               />
               <HostEntryTile
                 kicker="Accepted invite"
@@ -1465,34 +1515,16 @@ export default function App() {
       {activeView === 'load' ? (
         <HostFlowShell
           title="Load Profile"
-          description="Choose whether to import a full device profile or recover one from your protected share."
+          description="Import a full device profile from its self-contained `bfprofile` package."
           onBack={() => setActiveView('landing')}
           backTooltip="Back"
         >
           <div className="igloo-flow-root igloo-stack">
-            <StepProgress steps={['Import or recover', 'Load device']} active={0} />
+            <StepProgress steps={['Import bfprofile', 'Load device']} active={0} />
             <section className="igloo-task-banner">
               <span className="igloo-task-kicker">Load a desktop device</span>
-              <p>Import a protected `bfprofile` or recover from a protected `bfshare`, then save the resulting desktop profile into the local encrypted profile store.</p>
+              <p>Import a protected `bfprofile`, then save the resulting desktop profile into the local encrypted profile store. To rebuild a lost device you need its `bfprofile` — a bare `bfshare` no longer carries the group package.</p>
             </section>
-            <div className="igloo-button-row">
-              <Button
-                type="button"
-                size="sm"
-                variant={loadMode === 'bfprofile' ? 'default' : 'secondary'}
-                onClick={() => setLoadMode('bfprofile')}
-              >
-                Import bfprofile
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={loadMode === 'bfshare' ? 'default' : 'secondary'}
-                onClick={() => setLoadMode('bfshare')}
-              >
-                Recover from bfshare
-              </Button>
-            </div>
             <label>
               Profile label
               <input
@@ -1519,19 +1551,74 @@ export default function App() {
               />
             </label>
             <label>
-              {loadMode}
+              bfprofile
               <Textarea
                 className="min-h-[140px]"
                 value={loadForm.packageText}
                 onChange={event => setLoadForm(current => ({ ...current, packageText: event.target.value }))}
-                placeholder={loadMode === 'bfprofile' ? 'Paste bfprofile1...' : 'Paste bfshare1...'}
+                placeholder="Paste bfprofile1..."
               />
             </label>
             <div className="igloo-button-row">
               <Button type="button" size="sm" onClick={() => void handleLoadPackage()}>
-                {loadMode === 'bfprofile' ? 'Import Profile' : 'Recover Profile'}
+                Import Profile
               </Button>
             </div>
+          </div>
+        </HostFlowShell>
+      ) : null}
+
+      {activeView === 'recover-key' ? (
+        <HostFlowShell
+          title="Recover Group Key"
+          description="Reconstruct the group secret key (nsec) locally from a threshold of shares. Nothing is published to a relay."
+          onBack={() => setActiveView('landing')}
+          backTooltip="Back"
+        >
+          <div className="igloo-flow-root igloo-stack">
+            <StepProgress steps={['Collect shares', 'Recovered key']} active={recoveredKey ? 1 : 0} />
+            <section className="igloo-task-banner">
+              <span className="igloo-task-kicker">Local key recovery</span>
+              <p>Pick a local profile to supply the group package and this device's own share, then paste the other members' `bfshare`s to meet the threshold.</p>
+            </section>
+            <label>
+              Recovering profile
+              <select
+                value={recoverProfileId}
+                onChange={event => setRecoverProfileId(event.target.value)}
+              >
+                <option value="">Select a local profile…</option>
+                {profiles.map(profile => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.label} ({shortProfileId(profile.id)})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <RecoverCollectSharesPanel
+              devicePassphrase={recoverDevicePassphrase}
+              onChangeDevicePassphrase={setRecoverDevicePassphrase}
+              sources={recoverSources}
+              threshold={1 + recoverSources.filter(source => source.packageText.trim().length > 0).length}
+              collectedCount={1 + recoverSources.filter(source => source.packageText.trim().length > 0).length}
+              onChangeSource={updateRecoverSource}
+              onAddSource={() => setRecoverSources(current => [...current, { packageText: '', packagePassword: '' }])}
+              onRemoveSource={index => setRecoverSources(current => current.filter((_, sourceIndex) => sourceIndex !== index))}
+              onNext={() => void handleRecoverGroupKey()}
+              actionLabel="Recover Key"
+            />
+            {recoveredKey ? (
+              <div className="igloo-stack">
+                <SensitiveTextarea label="Recovered nsec" value={recoveredKey.nsec} placeholderLines={3} rows={3} />
+                <SensitiveTextarea
+                  label="Signing key hex"
+                  value={recoveredKey.signing_key_hex}
+                  placeholderLines={3}
+                  rows={3}
+                />
+                <p className="igloo-recover-helper">Group public key: {recoveredKey.group_public_key}</p>
+              </div>
+            ) : null}
           </div>
         </HostFlowShell>
       ) : null}

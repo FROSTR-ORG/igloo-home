@@ -1169,7 +1169,7 @@ export default function App() {
       }),
     );
     setRecoveredKey(recovered);
-    setNotice('Group secret key recovered locally. Copy it somewhere safe, then clear this screen.');
+    setNotice('Group secret key recovered locally and shown in plaintext. Move it to an encrypted store, then leave this screen to clear it.');
   }
 
   async function handleRotateKey() {
@@ -1664,6 +1664,16 @@ export default function App() {
                   rows={3}
                 />
                 <p className="igloo-recover-helper">Group public key: {recoveredKey.group_public_key}</p>
+                <section className="igloo-task-banner">
+                  <span className="igloo-task-kicker">Handle the key with care</span>
+                  <p>
+                    This group secret key was reconstructed on this device and is shown
+                    here in plaintext — displaying it means it left the secure core and
+                    crossed into the app window, so treat it as exposed to this machine.
+                    Move it into an encrypted store now, then leave this screen to clear
+                    it from the app. Nothing is written to disk for you.
+                  </p>
+                </section>
               </div>
             ) : null}
           </div>

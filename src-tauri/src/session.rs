@@ -163,6 +163,15 @@ pub fn make_rotated_keyset(
 /// its own share (unlocked with `device_passphrase`); `sources` are the other
 /// members' password-sealed bfshares. Each pasted share secret is mapped to its
 /// member index via the group and fails loudly if it is not a member. No relay.
+///
+/// In-transit secret note: unlike the `igloo-shell` recover path — which writes
+/// the recovered group `nsec` straight to a `0o600` file and never renders it —
+/// the home host returns the plaintext `nsec`/hex in [`RecoveredGroupKey`] so
+/// the operator can view and save it. That value therefore crosses the
+/// Tauri IPC boundary into the webview in the clear; the struct's redacted
+/// `Debug` (see `models.rs`) only keeps it out of logs, it does not protect the
+/// IPC payload itself. This is an accepted, operator-initiated exposure on a
+/// local-only flow (no relay), surfaced to the operator in the recover view.
 pub fn recover_group_key_from_shares(
     paths: &ShellPaths,
     profile_id: &str,

@@ -81,6 +81,7 @@ fn dispatch_profile_command(
                 | "import_profile_from_onboarding"
                 | "import_profile_from_bfprofile"
                 | "recover_group_key"
+                | "get_profile_threshold"
                 | "connect_onboarding_package"
                 | "finalize_connected_onboarding"
                 | "discard_connected_onboarding"
@@ -140,6 +141,13 @@ fn dispatch_profile_command(
             let input: RecoverGroupKeyInput = serde_json::from_value(input)?;
             Some(
                 app::commands::recover_group_key(state.inner(), input)
+                    .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+            )
+        }
+        "get_profile_threshold" => {
+            let profile_id: String = serde_json::from_value(input)?;
+            Some(
+                app::commands::get_profile_threshold(state.inner(), &profile_id)
                     .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
             )
         }
@@ -306,6 +314,7 @@ const EXPECTED_DISPATCH_COMMANDS: &[&str] = &[
     "export_profile",
     "export_profile_package",
     "finalize_connected_onboarding",
+    "get_profile_threshold",
     "health",
     "import_profile_from_bfprofile",
     "import_profile_from_onboarding",

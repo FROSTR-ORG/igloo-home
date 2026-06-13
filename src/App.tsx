@@ -55,6 +55,7 @@ import {
   importProfileFromRaw,
   listProfiles,
   listRelayProfiles,
+  getProfileThreshold,
   profileRuntimeSnapshot,
   refreshRuntimePeers,
   recoverGroupKey,
@@ -604,12 +605,21 @@ export default function App() {
   // Recover the group secret key (nsec) from a threshold of shares: the selected
   // local profile contributes its own share (unlocked with the device
   // passphrase) plus the pasted bfshares. Fully local — no relay.
-  const [recoverProfileId, setRecoverProfileId] = useState('');
-  const [recoverDevicePassphrase, setRecoverDevicePassphrase] = useState('');
-  const [recoverSources, setRecoverSources] = useState<SharedRecoverSource[]>([
-    { packageText: '', packagePassword: '' },
-  ]);
-  const [recoveredKey, setRecoveredKey] = useState<RecoveredGroupKey | null>(null);
+  const [recoverProfileId, setRecoverProfileId] = useState(visualScenario?.recoverProfileId ?? '');
+  const [recoverDevicePassphrase, setRecoverDevicePassphrase] = useState(
+    visualScenario?.recoverDevicePassphrase ?? '',
+  );
+  const [recoverSources, setRecoverSources] = useState<SharedRecoverSource[]>(
+    visualScenario?.recoverSources ?? [{ packageText: '', packagePassword: '' }],
+  );
+  const [recoveredKey, setRecoveredKey] = useState<RecoveredGroupKey | null>(
+    visualScenario?.recoveredKey ?? null,
+  );
+  // Recovery threshold for the selected profile (read from its plaintext group
+  // package), driving an accurate "collected of threshold" meter.
+  const [recoverThreshold, setRecoverThreshold] = useState<number | null>(
+    visualScenario?.recoverThreshold ?? null,
+  );
   const [runtimeSnapshot, setRuntimeSnapshot] = useState<ProfileRuntimeSnapshot | null>(
     visualScenario?.runtimeSnapshot ?? null,
   );
@@ -727,6 +737,43 @@ export default function App() {
     }
     void refreshRuntime(selectedProfileId);
   }, [selectedProfileId, visualScenario]);
+
+  // Clear the reconstructed key + recovery inputs whenever the operator leaves
+  // the recover-key view, so the group nsec does not linger in app state.
+  useEffect(() => {
+    if (activeView !== 'recover-key') {
+      setRecoveredKey(null);
+      setRecoverDevicePassphrase('');
+      setRecoverSources([{ packageText: '', packagePassword: '' }]);
+    }
+  }, [activeView]);
+
+  // Load the selected profile's recovery threshold (from its plaintext group
+  // package) so the collected-shares meter is accurate.
+  useEffect(() => {
+    if (visualScenario) {
+      return;
+    }
+    if (!recoverProfileId) {
+      setRecoverThreshold(null);
+      return;
+    }
+    let cancelled = false;
+    void getProfileThreshold(recoverProfileId)
+      .then((threshold) => {
+        if (!cancelled) {
+          setRecoverThreshold(threshold);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecoverThreshold(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [recoverProfileId, visualScenario]);
 
   useEffect(() => {
     if (visualScenario) {
@@ -1599,7 +1646,7 @@ export default function App() {
               devicePassphrase={recoverDevicePassphrase}
               onChangeDevicePassphrase={setRecoverDevicePassphrase}
               sources={recoverSources}
-              threshold={1 + recoverSources.filter(source => source.packageText.trim().length > 0).length}
+              threshold={recoverThreshold ?? 1 + recoverSources.filter(source => source.packageText.trim().length > 0).length}
               collectedCount={1 + recoverSources.filter(source => source.packageText.trim().length > 0).length}
               onChangeSource={updateRecoverSource}
               onAddSource={() => setRecoverSources(current => [...current, { packageText: '', packagePassword: '' }])}

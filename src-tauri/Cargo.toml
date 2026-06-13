@@ -43,6 +43,7 @@ bifrost-core = { path = "../../bifrost-rs/crates/bifrost-core" }
 bifrost-profile = { path = "../../bifrost-rs/crates/bifrost-profile" }
 bifrost-signer = { path = "../../bifrost-rs/crates/bifrost-signer" }
 frostr-utils = { path = "../../bifrost-rs/crates/frostr-utils" }
+zeroize = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 bincode = "1"

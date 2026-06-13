@@ -79,6 +79,7 @@ const scenarios = [
   'landing-seeded',
   'create',
   'load',
+  'recover-key',
   'onboard-connect',
   'onboard-save',
   'dashboard-signer',

@@ -3,6 +3,7 @@ use bifrost_core::secret::Passphrase;
 use bifrost_profile::{ProfileManifest, ProfilePreview};
 use bifrost_signer::DeviceStatus;
 use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::profiles::DaemonMetadata;
 
@@ -149,11 +150,25 @@ pub struct RecoverGroupKeyInput {
     pub sources: Vec<RotationSourceInput>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Reconstructed group secret-key material returned to the frontend. The secret
+/// fields zeroize on drop (scrubbing the Rust-side heap copy once the IPC layer
+/// has serialized the response) and are redacted in `Debug`.
+#[derive(Serialize, Zeroize, ZeroizeOnDrop)]
 pub struct RecoveredGroupKey {
     pub nsec: String,
     pub signing_key_hex: String,
+    #[zeroize(skip)]
     pub group_public_key: String,
+}
+
+impl std::fmt::Debug for RecoveredGroupKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecoveredGroupKey")
+            .field("nsec", &"<redacted>")
+            .field("signing_key_hex", &"<redacted>")
+            .field("group_public_key", &self.group_public_key)
+            .finish()
+    }
 }
 
 // Secret-bearing IPC input; see note above. Deserialize-only.

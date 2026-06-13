@@ -113,6 +113,13 @@ pub fn recover_group_key(
     )
 }
 
+/// Read a local profile's recovery threshold from its plaintext group package
+/// (no passphrase). Lets the recover-key UI show an accurate "collected of
+/// threshold" meter.
+pub fn get_profile_threshold(state: &AppState, profile_id: &str) -> Result<u16> {
+    Ok(profiles::read_profile_group_package(&state.shell_paths, profile_id)?.threshold)
+}
+
 pub async fn apply_rotation_update(
     state: &AppState,
     input: ApplyRotationUpdateInput,
@@ -392,6 +399,14 @@ pub async fn recover_group_key_command(
     input: RecoverGroupKeyInput,
 ) -> std::result::Result<crate::models::RecoveredGroupKey, HomeError> {
     Ok(recover_group_key(state.inner(), input)?)
+}
+
+#[tauri::command]
+pub async fn get_profile_threshold_command(
+    state: State<'_, AppState>,
+    profile_id: String,
+) -> std::result::Result<u16, HomeError> {
+    Ok(get_profile_threshold(state.inner(), &profile_id)?)
 }
 
 #[tauri::command]

@@ -87,6 +87,7 @@ pub fn run() {
             super::commands::discard_connected_onboarding_command,
             super::commands::import_profile_from_bfprofile_command,
             super::commands::recover_group_key_command,
+            super::commands::get_profile_threshold_command,
             super::commands::apply_rotation_update_command,
             super::commands::remove_profile_command,
             super::commands::export_profile_command,

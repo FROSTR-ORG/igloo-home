@@ -4,6 +4,7 @@ import type {
   GeneratedKeyset,
   ProfileManifest,
   ProfileRuntimeSnapshot,
+  RecoveredGroupKey,
 } from '@/lib/types';
 
 export type VisualScenarioName =
@@ -11,6 +12,7 @@ export type VisualScenarioName =
   | 'landing-seeded'
   | 'create'
   | 'load'
+  | 'recover-key'
   | 'onboard-connect'
   | 'onboard-save'
   | 'dashboard-signer'
@@ -18,7 +20,14 @@ export type VisualScenarioName =
   | 'dashboard-settings';
 
 type VisualScenarioState = {
-  activeView: 'landing' | 'create' | 'load' | 'onboard-connect' | 'onboard-save' | 'dashboard';
+  activeView:
+    | 'landing'
+    | 'create'
+    | 'load'
+    | 'recover-key'
+    | 'onboard-connect'
+    | 'onboard-save'
+    | 'dashboard';
   activeDashboardTab: 'signer' | 'permissions' | 'settings';
   settings: AppSettings;
   profiles: ProfileManifest[];
@@ -69,6 +78,11 @@ type VisualScenarioState = {
     packagePassword: string;
     packageText: string;
   };
+  recoverProfileId: string;
+  recoverDevicePassphrase: string;
+  recoverSources: Array<{ packageText: string; packagePassword: string }>;
+  recoveredKey: RecoveredGroupKey | null;
+  recoverThreshold: number | null;
   saveForms: Record<number, { label: string; passphrase: string; relayUrls: string }>;
   packageDraft: {
     packagePassword: string;
@@ -226,6 +240,11 @@ const baseState: VisualScenarioState = {
     packagePassword: 'preview-password',
     packageText: 'bfprofile1visualpreview',
   },
+  recoverProfileId: 'alice-laptop',
+  recoverDevicePassphrase: '',
+  recoverSources: [{ packageText: '', packagePassword: '' }],
+  recoveredKey: null,
+  recoverThreshold: 2,
   saveForms: {
     1: { label: 'Alice Generated', passphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
     2: { label: 'Bob Generated', passphrase: 'visual-preview-pass', relayUrls: 'wss://relay.primal.net' },
@@ -249,6 +268,15 @@ export function resolveVisualScenario(): VisualScenarioState | null {
       return { ...baseState, activeView: 'landing' };
     case 'load':
       return { ...baseState, activeView: 'load' };
+    case 'recover-key':
+      return {
+        ...baseState,
+        activeView: 'recover-key',
+        recoverDevicePassphrase: 'visual-preview-pass',
+        recoverSources: [
+          { packageText: 'bfshare1visualpreview', packagePassword: 'preview-password' },
+        ],
+      };
     case 'onboard-connect':
       return { ...baseState, activeView: 'onboard-connect', pendingOnboardConnection: null };
     case 'onboard-save':

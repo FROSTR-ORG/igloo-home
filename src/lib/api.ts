@@ -221,6 +221,10 @@ export function recoverGroupKey(input: {
   }).catch(rethrowHomeError);
 }
 
+export function getProfileThreshold(profileId: string) {
+  return invoke<number>('get_profile_threshold_command', { profileId }).catch(rethrowHomeError);
+}
+
 export function applyRotationUpdate(input: {
   targetProfileId: string;
   passphrase: string;

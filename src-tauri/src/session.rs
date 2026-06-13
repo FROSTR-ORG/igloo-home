@@ -418,3 +418,213 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod recover_rotate_tests {
+    use super::*;
+    use crate::profiles::{
+        ProfileImportResult, RelayProfile, import_profile_from_raw_json,
+        replace_managed_relay_profile,
+    };
+    use bifrost_core::types::SharePackage;
+    use frostr_utils::{BfSharePayload, KeysetBundle, encode_bfshare_package};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    const PASS: &str = "device-passphrase";
+
+    fn test_paths(label: &str) -> ShellPaths {
+        let root = std::env::temp_dir().join(format!(
+            "igloo-home-recover-test-{label}-{}",
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        ShellPaths {
+            config_dir: root.join("config").join("igloo-shell"),
+            data_dir: root.join("data").join("igloo-shell"),
+            state_dir: root.join("state").join("igloo-shell"),
+            profiles_dir: root.join("config").join("igloo-shell").join("profiles"),
+            groups_dir: root.join("data").join("igloo-shell").join("groups"),
+            encrypted_profiles_dir: root
+                .join("data")
+                .join("igloo-shell")
+                .join("encrypted-profiles"),
+            state_profiles_dir: root.join("state").join("igloo-shell").join("profiles"),
+            rotations_dir: root.join("state").join("igloo-shell").join("rotations"),
+            config_path: root.join("config").join("igloo-shell").join("config.json"),
+            relay_profiles_path: root
+                .join("config")
+                .join("igloo-shell")
+                .join("relay-profiles.json"),
+            imports_dir: root.join("data").join("igloo-shell").join("imports"),
+        }
+    }
+
+    fn relays() -> Vec<String> {
+        vec!["ws://127.0.0.1:8194".to_string()]
+    }
+
+    /// Import a profile holding `bundle.shares[share_pos]` and return its id.
+    fn import_profile(paths: &ShellPaths, bundle: &KeysetBundle, share_pos: usize) -> String {
+        paths.ensure().expect("ensure paths");
+        replace_managed_relay_profile(
+            paths,
+            RelayProfile {
+                id: "local".to_string(),
+                label: "Local".to_string(),
+                relays: relays(),
+            },
+        )
+        .expect("relay profile");
+        let group_json = encode_group_package_json(&bundle.group).expect("group json");
+        let share_json = encode_share_package_json(&bundle.shares[share_pos]).expect("share json");
+        let result = import_profile_from_raw_json(
+            paths,
+            Some("Desktop".to_string()),
+            Some("local".to_string()),
+            &relays(),
+            Some(Passphrase::new(PASS.to_string())),
+            &group_json,
+            &share_json,
+        )
+        .expect("import profile");
+        match result {
+            ProfileImportResult::ProfileCreated { profile, .. } => profile.id,
+            other => panic!("expected ProfileCreated, got {other:?}"),
+        }
+    }
+
+    fn bfshare_source(share: &SharePackage, password: &str) -> RotationSourceInput {
+        let package = encode_bfshare_package(
+            &BfSharePayload {
+                share_secret: hex::encode(share.seckey.expose_bytes()),
+                relays: relays(),
+            },
+            password,
+        )
+        .expect("encode bfshare");
+        RotationSourceInput {
+            package,
+            package_password: Passphrase::new(password.to_string()),
+        }
+    }
+
+    #[test]
+    fn recover_group_key_happy_path() {
+        let paths = test_paths("recover-happy");
+        let bundle = create_keyset(CreateKeysetConfig::new("Recover Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        let sources = vec![bfshare_source(&bundle.shares[1], "share-1-pw")];
+        let recovered = recover_group_key_from_shares(
+            &paths,
+            &profile_id,
+            Passphrase::new(PASS.into()),
+            sources,
+        )
+        .expect("recover");
+        assert_eq!(
+            recovered.group_public_key,
+            hex::encode(bundle.group.group_pk)
+        );
+        assert!(
+            recovered.nsec.starts_with("nsec1"),
+            "expected bech32 nsec, got {}",
+            recovered.nsec
+        );
+    }
+
+    #[test]
+    fn recover_group_key_rejects_non_member_share() {
+        let paths = test_paths("recover-nonmember");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group A", 2, 3)).expect("keyset a");
+        let foreign = create_keyset(CreateKeysetConfig::new("Group B", 2, 3)).expect("keyset b");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        let sources = vec![bfshare_source(&foreign.shares[1], "pw")];
+        let err = recover_group_key_from_shares(
+            &paths,
+            &profile_id,
+            Passphrase::new(PASS.into()),
+            sources,
+        )
+        .expect_err("non-member share must fail loudly");
+        assert!(
+            err.to_string().contains("does not match any member"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn recover_group_key_rejects_insufficient_shares() {
+        let paths = test_paths("recover-insufficient");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        // The device share alone (1) is below the threshold (2); no pasted sources.
+        let err = recover_group_key_from_shares(
+            &paths,
+            &profile_id,
+            Passphrase::new(PASS.into()),
+            vec![],
+        )
+        .expect_err("insufficient shares must fail");
+        assert!(
+            err.to_string().contains("insufficient"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn recover_group_key_rejects_duplicate_member() {
+        let paths = test_paths("recover-duplicate");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        // Paste the device's own member (shares[0]) again.
+        let sources = vec![bfshare_source(&bundle.shares[0], "pw")];
+        let err = recover_group_key_from_shares(
+            &paths,
+            &profile_id,
+            Passphrase::new(PASS.into()),
+            sources,
+        )
+        .expect_err("duplicate member must fail");
+        assert!(
+            err.to_string().contains("more than once"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rotate_keyset_happy_path_preserves_group_key() {
+        let paths = test_paths("rotate-happy");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        let sources = vec![
+            bfshare_source(&bundle.shares[0], "pw0"),
+            bfshare_source(&bundle.shares[1], "pw1"),
+        ];
+        let rotated = make_rotated_keyset(&paths, 2, 3, &profile_id, sources).expect("rotate");
+        assert_eq!(rotated.source, "rotated");
+        assert_eq!(rotated.threshold, 2);
+        assert_eq!(rotated.count, 3);
+        assert_eq!(rotated.shares.len(), 3);
+        // Rotation re-shares the same secret: the group public key is preserved.
+        assert_eq!(rotated.group_public_key, hex::encode(bundle.group.group_pk));
+    }
+
+    #[test]
+    fn rotate_keyset_rejects_non_member_source() {
+        let paths = test_paths("rotate-nonmember");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group A", 2, 3)).expect("keyset a");
+        let foreign = create_keyset(CreateKeysetConfig::new("Group B", 2, 3)).expect("keyset b");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        let sources = vec![
+            bfshare_source(&bundle.shares[0], "pw0"),
+            bfshare_source(&foreign.shares[1], "pw1"),
+        ];
+        let err = make_rotated_keyset(&paths, 2, 3, &profile_id, sources)
+            .expect_err("non-member source must fail loudly");
+        assert!(
+            err.to_string().contains("does not match any member"),
+            "unexpected error: {err}"
+        );
+    }
+}

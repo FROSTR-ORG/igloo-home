@@ -2145,6 +2145,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "thiserror 1.0.69",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]

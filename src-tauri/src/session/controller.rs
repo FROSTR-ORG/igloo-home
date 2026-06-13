@@ -260,12 +260,11 @@ pub async fn profile_session_snapshot(
     } else {
         None
     };
-    let runtime_diagnostics = match &runtime_status {
-        Some(runtime_status) => Some(serde_json::json!({
+    let runtime_diagnostics = runtime_status.as_ref().map(|runtime_status| {
+        serde_json::json!({
             "runtime_status": runtime_status,
-        })),
-        None => None,
-    };
+        })
+    });
 
     Ok(ProfileRuntimeSnapshot {
         active,

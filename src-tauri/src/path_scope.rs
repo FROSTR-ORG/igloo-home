@@ -35,8 +35,17 @@ impl fmt::Display for PathScopeError {
             Self::Io(error) => write!(f, "path canonicalization failed: {error}"),
             Self::NoParent => write!(f, "path has no parent component"),
             Self::NoFileName => write!(f, "path has no file-name component"),
-            Self::OutsideAllowedRoots { path, .. } => {
-                write!(f, "path {} is outside the allowed scope", path.display())
+            Self::OutsideAllowedRoots { path, roots } => {
+                let roots = roots
+                    .iter()
+                    .map(|root| root.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(
+                    f,
+                    "path {} is outside the allowed scope (roots: {roots})",
+                    path.display()
+                )
             }
         }
     }
@@ -131,9 +140,11 @@ mod tests {
         fs::create_dir_all(child_path.parent().unwrap()).expect("create nested dir");
         fs::write(&child_path, b"test").expect("write test file");
 
-        let canonical =
-            canonicalize_under_scope(child_path.to_str().expect("utf8 path"), &[root.clone()])
-                .expect("child should be accepted");
+        let canonical = canonicalize_under_scope(
+            child_path.to_str().expect("utf8 path"),
+            std::slice::from_ref(&root),
+        )
+        .expect("child should be accepted");
 
         assert!(
             canonical.starts_with(root.canonicalize().expect("canonical root")),
@@ -149,8 +160,10 @@ mod tests {
         // must resolve `..` and notice the result escapes the root.
         let traversal = root.join("..").join("..").join("etc").join("passwd");
 
-        let result =
-            canonicalize_under_scope(traversal.to_str().expect("utf8 path"), &[root.clone()]);
+        let result = canonicalize_under_scope(
+            traversal.to_str().expect("utf8 path"),
+            std::slice::from_ref(&root),
+        );
 
         match result {
             Err(PathScopeError::OutsideAllowedRoots { path, .. }) => {
@@ -180,8 +193,10 @@ mod tests {
         let link_path = root.join("escape");
         symlink(&outside, &link_path).expect("create symlink");
 
-        let result =
-            canonicalize_under_scope(link_path.to_str().expect("utf8 path"), &[root.clone()]);
+        let result = canonicalize_under_scope(
+            link_path.to_str().expect("utf8 path"),
+            std::slice::from_ref(&root),
+        );
 
         match result {
             Err(PathScopeError::OutsideAllowedRoots { path, .. }) => {
@@ -201,7 +216,10 @@ mod tests {
         let other = make_scope_root("absolute-other");
 
         // `other` is a real directory outside `root`; request it directly.
-        let result = canonicalize_under_scope(other.to_str().expect("utf8 path"), &[root.clone()]);
+        let result = canonicalize_under_scope(
+            other.to_str().expect("utf8 path"),
+            std::slice::from_ref(&root),
+        );
 
         match result {
             Err(PathScopeError::OutsideAllowedRoots { path, .. }) => {
@@ -220,9 +238,11 @@ mod tests {
         let dest = root.join("new-export.bfprofile");
         assert!(!dest.exists(), "precondition: dest must not exist");
 
-        let canonical =
-            canonicalize_under_scope(dest.to_str().expect("utf8 path"), &[root.clone()])
-                .expect("nonexistent child with existing parent must be accepted");
+        let canonical = canonicalize_under_scope(
+            dest.to_str().expect("utf8 path"),
+            std::slice::from_ref(&root),
+        )
+        .expect("nonexistent child with existing parent must be accepted");
 
         let canonical_root = root.canonicalize().expect("canonical root");
         assert!(
@@ -240,7 +260,10 @@ mod tests {
         let root = make_scope_root("missing-parent");
         let dest = root.join("does-not-exist").join("file.bfprofile");
 
-        let result = canonicalize_under_scope(dest.to_str().expect("utf8 path"), &[root.clone()]);
+        let result = canonicalize_under_scope(
+            dest.to_str().expect("utf8 path"),
+            std::slice::from_ref(&root),
+        );
 
         match result {
             Err(PathScopeError::Io(_)) => {}

@@ -36,10 +36,10 @@ pub fn run() {
         ))
         .manage(app_state)
         .setup(move |app| {
-            crate::settings::apply_launch_on_login(&app.handle(), &settings)?;
+            crate::settings::apply_launch_on_login(app.handle(), &settings)?;
             #[cfg(feature = "test-server")]
             if crate::paths::is_test_mode() {
-                crate::test_mode::start_server(&app.handle())?;
+                crate::test_mode::start_server(app.handle())?;
             }
             #[cfg(not(feature = "test-server"))]
             if crate::paths::is_test_mode() {
@@ -54,7 +54,7 @@ pub fn run() {
                     settings: app_state.settings.lock().unwrap().clone(),
                 },
             );
-            sync_tray(&app.handle())?;
+            sync_tray(app.handle())?;
             if let Some(window) = app.get_webview_window("main") {
                 if crate::paths::should_show_main_window() {
                     let _ = window.show();

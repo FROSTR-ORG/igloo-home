@@ -62,20 +62,11 @@ pub struct PendingOnboardingState {
     pub connected: ConnectedOnboardingImport,
 }
 
+#[derive(Default)]
 pub struct SignerState {
     pub active: Option<ActiveSigner>,
     pub logs: VecDeque<SignerLogEntry>,
     pub last_session: Option<SessionResume>,
-}
-
-impl Default for SignerState {
-    fn default() -> Self {
-        Self {
-            active: None,
-            logs: VecDeque::new(),
-            last_session: None,
-        }
-    }
 }
 
 pub struct ActiveSigner {
@@ -259,11 +250,11 @@ pub(crate) fn spawn_monitor(
         let mut last_status = None::<String>;
         while !stop_flag.load(Ordering::Relaxed) {
             if let Ok(status) = bridge.status().await {
-                if let Ok(encoded) = serde_json::to_string(&status) {
-                    if last_status.as_ref() != Some(&encoded) {
-                        last_status = Some(encoded);
-                        let _ = app.emit(EVENT_SIGNER_STATUS, SignerStatusEvent { status });
-                    }
+                if let Ok(encoded) = serde_json::to_string(&status)
+                    && last_status.as_ref() != Some(&encoded)
+                {
+                    last_status = Some(encoded);
+                    let _ = app.emit(EVENT_SIGNER_STATUS, SignerStatusEvent { status });
                 }
             } else {
                 let entry = make_log("error", "signer status poll failed".to_string());
@@ -297,12 +288,11 @@ fn generated_keyset_response(
             name: format!("Member {}", share.idx),
             member_idx: share.idx,
             share_public_key: hex::encode(
-                k256::SecretKey::from_slice(share.seckey.expose_bytes())
+                &k256::SecretKey::from_slice(share.seckey.expose_bytes())
                     .map_err(|error| anyhow!("invalid share seckey: {error}"))?
                     .public_key()
                     .to_encoded_point(true)
-                    .as_bytes()[1..]
-                    .to_vec(),
+                    .as_bytes()[1..],
             ),
             share_package_json: encode_share_package_json(share)?,
         });

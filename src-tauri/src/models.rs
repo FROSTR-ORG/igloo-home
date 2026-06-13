@@ -282,19 +282,10 @@ pub struct AppPathsResponse {
     pub runtime_dir: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct AppSettings {
     pub close_to_tray: bool,
     pub launch_on_login: bool,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            close_to_tray: false,
-            launch_on_login: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

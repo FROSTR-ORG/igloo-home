@@ -32,15 +32,24 @@ pub enum HomeError {
     #[error("profile already exists")]
     ProfileAlreadyExists { id: String },
 
+    // The next three variants are part of the stable serialized IPC contract
+    // (the `HomeErrorPayload` union in src/lib/api.ts) and are exercised by the
+    // serialization tests below, but no Rust command path constructs them yet —
+    // the `From<anyhow::Error>` lift currently funnels those conditions through
+    // `Bifrost`. They are reserved for typed command paths; keep them rather
+    // than break the frontend union. See the module doc for the contract shape.
     /// Passphrase could not decrypt the profile.
+    #[allow(dead_code)]
     #[error("invalid passphrase")]
     InvalidPassphrase,
 
     /// Encrypted profile package could not be decoded.
+    #[allow(dead_code)]
     #[error("invalid package")]
     InvalidPackage { reason: String },
 
     /// An onboarding operation is already in progress for this profile.
+    #[allow(dead_code)]
     #[error("onboarding already pending")]
     OnboardingPending { profile_id: String },
 

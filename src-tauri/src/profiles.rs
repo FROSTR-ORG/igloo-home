@@ -414,7 +414,6 @@ fn resolve_or_create_relay_profile(
             })
             .collect::<String>()
             .trim_matches('-')
-            .to_string()
     );
     let profile_id = if profile_id == "home-" {
         format!("home-{}", now_unix_secs())

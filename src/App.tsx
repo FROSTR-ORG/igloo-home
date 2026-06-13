@@ -29,7 +29,6 @@ import {
   Textarea,
   type LogEntry,
   type OperatorSignerSettings,
-  type PeerPolicy,
   type SharedDistributionAction,
   type SharedDistributionResult,
   type SharedDistributionStatus,
@@ -38,7 +37,9 @@ import {
 import {
   buildPolicyDashboardView,
   buildSignerDashboardView,
+  EMPTY_HOME_PEER_TELEMETRY,
   type HomePeerPermissionState,
+  type HomePeerRow,
   type HomePendingOperation,
 } from '@/lib/dashboard-view';
 import {
@@ -394,7 +395,7 @@ function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | n
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 }
 
-function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): PeerPolicy[] {
+function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): HomePeerRow[] {
   const permissionStateByPubkey = new Map(
     extractPeerPermissionStates(runtimeSnapshot).map((entry) => [entry.pubkey.toLowerCase(), entry])
   );
@@ -403,7 +404,7 @@ function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): Pe
   const metadataPeers: string[] = Array.isArray(runtimeStatus?.metadata?.peers)
     ? runtimeStatus.metadata.peers
     : [];
-  const rows = new Map<string, PeerPolicy>();
+  const rows = new Map<string, HomePeerRow>();
 
   for (const [index, pubkey] of metadataPeers.entries()) {
     if (typeof pubkey !== 'string') continue;
@@ -421,6 +422,7 @@ function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): Pe
       outgoingAvailable: 0,
       outgoingSpent: 0,
       shouldSendNonces: false,
+      ...EMPTY_HOME_PEER_TELEMETRY,
     });
   }
 
@@ -444,6 +446,15 @@ function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): Pe
       outgoingAvailable: typeof peer.outgoing_available === 'number' ? peer.outgoing_available : 0,
       outgoingSpent: typeof peer.outgoing_spent === 'number' ? peer.outgoing_spent : 0,
       shouldSendNonces: Boolean(peer.should_send_nonces),
+      canSign,
+      canEcdh: Boolean(peer.can_ecdh),
+      canPing: Boolean(peer.can_ping),
+      lastResponseLatencyMs:
+        typeof peer.last_response_latency_ms === 'number' ? peer.last_response_latency_ms : null,
+      avgLatencyMs: typeof peer.avg_latency_ms === 'number' ? peer.avg_latency_ms : null,
+      nonceSeries: Array.isArray(peer.nonce_history)
+        ? peer.nonce_history.map((point) => ({ ts: point.ts, held: point.held }))
+        : [],
     });
   }
 

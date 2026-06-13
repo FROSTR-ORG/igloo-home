@@ -4,7 +4,6 @@
 // take a single `view` model instead of the previous loose props; this module is
 // the desktop-host equivalent of igloo-pwa's dashboard view derivation.
 import type {
-  PeerPolicy,
   PeerReadinessRowModel,
   PendingOperationRowModel,
   PeerPolicyRowModel,
@@ -47,48 +46,6 @@ function formatTimestamp(value: number | null | undefined): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-// Per-peer telemetry (capability badges, latency, nonce sparkline) the native
-// runtime now supplies, carried alongside the igloo-ui peer-list shape.
-export type HomePeerTelemetry = {
-  canSign: boolean;
-  canEcdh: boolean;
-  canPing: boolean;
-  lastResponseLatencyMs: number | null;
-  avgLatencyMs: number | null;
-  nonceSeries: Array<{ ts: number; held: number }>;
-};
-
-export type HomePeerRow = PeerPolicy & HomePeerTelemetry;
-
-export const EMPTY_HOME_PEER_TELEMETRY: HomePeerTelemetry = {
-  canSign: false,
-  canEcdh: false,
-  canPing: false,
-  lastResponseLatencyMs: null,
-  avgLatencyMs: null,
-  nonceSeries: [],
-};
-
-function toReadinessRow(peer: HomePeerRow): PeerReadinessRowModel {
-  return {
-    id: peer.pubkey,
-    alias: peer.alias,
-    pubkey: peer.pubkey,
-    state: peer.state,
-    statusLabel: peer.statusLabel ?? peer.state,
-    canSign: peer.canSign,
-    canEcdh: peer.canEcdh,
-    canPing: peer.canPing,
-    lastResponseLatencyMs: peer.lastResponseLatencyMs,
-    avgLatencyMs: peer.avgLatencyMs,
-    nonceSeries: peer.nonceSeries,
-    lastSeenLabel: peer.lastSeen ? `last seen ${formatTimestamp(peer.lastSeen)}` : undefined,
-    incomingAvailable: peer.incomingAvailable,
-    outgoingAvailable: peer.outgoingAvailable,
-    outgoingSpent: peer.outgoingSpent,
-  };
 }
 
 function toPendingRow(op: HomePendingOperation): PendingOperationRowModel {
@@ -134,7 +91,7 @@ export function buildSignerDashboardView(input: {
   sharePublicKey?: string;
   memberIdx?: number;
   running: boolean;
-  peers: HomePeerRow[];
+  peers: PeerReadinessRowModel[];
   pendingOperations: HomePendingOperation[];
   logLines?: string[];
 }): SignerDashboardViewModel | null {
@@ -148,7 +105,7 @@ export function buildSignerDashboardView(input: {
     running: input.running,
     readinessLabel: input.running ? 'Signer online' : 'Signer stopped',
     relaySummary: input.running ? 'Desktop runtime connected' : 'Runtime stopped',
-    peerRows: input.peers.map(toReadinessRow),
+    peerRows: input.peers,
     pendingApprovalRows: [],
     pendingOperationRows: input.pendingOperations.map(toPendingRow),
     eventRows: toEventRows(input.logLines),

@@ -14,12 +14,14 @@ import {
   Button,
   ContentCard,
   HostEntryTile,
+  buildPeerReadinessRows,
   HostFlowShell,
   OperatorDashboardTabs,
   OperatorPermissionsPanel,
   OperatorSettingsPanel,
   OperatorSignerPanel,
   PageLayout,
+  type PeerReadinessRowModel,
   ProfileConfirmationCard,
   QrPayloadModal,
   RecoverCollectSharesPanel,
@@ -37,9 +39,7 @@ import {
 import {
   buildPolicyDashboardView,
   buildSignerDashboardView,
-  EMPTY_HOME_PEER_TELEMETRY,
   type HomePeerPermissionState,
-  type HomePeerRow,
   type HomePendingOperation,
 } from '@/lib/dashboard-view';
 import {
@@ -395,70 +395,17 @@ function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | n
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 }
 
-function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): HomePeerRow[] {
-  const permissionStateByPubkey = new Map(
-    extractPeerPermissionStates(runtimeSnapshot).map((entry) => [entry.pubkey.toLowerCase(), entry])
-  );
+function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): PeerReadinessRowModel[] {
   const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
   const peers: RuntimePeerStatus[] = Array.isArray(runtimeStatus?.peers) ? runtimeStatus.peers : [];
-  const metadataPeers: string[] = Array.isArray(runtimeStatus?.metadata?.peers)
+  const rosterPubkeys: string[] = Array.isArray(runtimeStatus?.metadata?.peers)
     ? runtimeStatus.metadata.peers
     : [];
-  const rows = new Map<string, HomePeerRow>();
-
-  for (const [index, pubkey] of metadataPeers.entries()) {
-    if (typeof pubkey !== 'string') continue;
-    const normalized = pubkey.toLowerCase();
-    const permissionState = permissionStateByPubkey.get(normalized);
-    rows.set(normalized, {
-      alias: `Peer ${index + 1}`,
-      pubkey: normalized,
-      send: permissionState?.effectivePolicy.request.sign ?? true,
-      receive: permissionState?.effectivePolicy.respond.sign ?? true,
-      state: 'idle',
-      statusLabel: 'known',
-      lastSeen: null,
-      incomingAvailable: 0,
-      outgoingAvailable: 0,
-      outgoingSpent: 0,
-      shouldSendNonces: false,
-      ...EMPTY_HOME_PEER_TELEMETRY,
-    });
-  }
-
-  for (const peer of peers) {
-    const pubkey = typeof peer.pubkey === 'string' ? peer.pubkey.toLowerCase() : null;
-    if (!pubkey) continue;
-    const permissionState = permissionStateByPubkey.get(pubkey);
-    const existing = rows.get(pubkey);
-    const canSign = Boolean(peer.can_sign);
-    const online = Boolean(peer.online);
-    const known = Boolean(peer.known);
-    rows.set(pubkey, {
-      alias: existing?.alias ?? `Peer ${typeof peer.idx === 'number' ? peer.idx : rows.size + 1}`,
-      pubkey,
-      send: permissionState?.effectivePolicy.request.sign ?? existing?.send ?? true,
-      receive: permissionState?.effectivePolicy.respond.sign ?? existing?.receive ?? true,
-      state: canSign ? 'warning' : online ? 'online' : known ? 'idle' : 'offline',
-      statusLabel: canSign ? 'sign-ready' : online ? 'online' : known ? 'known' : 'offline',
-      lastSeen: typeof peer.last_seen === 'number' ? peer.last_seen : null,
-      incomingAvailable: typeof peer.incoming_available === 'number' ? peer.incoming_available : 0,
-      outgoingAvailable: typeof peer.outgoing_available === 'number' ? peer.outgoing_available : 0,
-      outgoingSpent: typeof peer.outgoing_spent === 'number' ? peer.outgoing_spent : 0,
-      shouldSendNonces: Boolean(peer.should_send_nonces),
-      canSign,
-      canEcdh: Boolean(peer.can_ecdh),
-      canPing: Boolean(peer.can_ping),
-      lastResponseLatencyMs:
-        typeof peer.last_response_latency_ms === 'number' ? peer.last_response_latency_ms : null,
-      avgLatencyMs: typeof peer.avg_latency_ms === 'number' ? peer.avg_latency_ms : null,
-      nonceSeries: Array.isArray(peer.nonce_history)
-        ? peer.nonce_history.map((point) => ({ ts: point.ts, held: point.held }))
-        : [],
-    });
-  }
-
-  return [...rows.values()].sort((a, b) => a.pubkey.localeCompare(b.pubkey));
+  return buildPeerReadinessRows({
+    peers,
+    rosterPubkeys,
+    policyPubkeys: extractPeerPermissionStates(runtimeSnapshot).map((entry) => entry.pubkey),
+  });
 }
 
 function extractPendingOperations(runtimeSnapshot: ProfileRuntimeSnapshot | null): HomePendingOperation[] {

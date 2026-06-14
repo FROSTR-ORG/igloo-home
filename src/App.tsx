@@ -15,6 +15,7 @@ import {
   ContentCard,
   HostEntryTile,
   buildPeerReadinessRows,
+  buildPendingApprovalRows,
   HostFlowShell,
   OperatorDashboardTabs,
   OperatorPermissionsPanel,
@@ -22,6 +23,7 @@ import {
   OperatorSignerPanel,
   PageLayout,
   type PeerReadinessRowModel,
+  type PendingApprovalRowModel,
   ProfileConfirmationCard,
   QrPayloadModal,
   RecoverCollectSharesPanel,
@@ -61,9 +63,11 @@ import {
   refreshRuntimePeers,
   recoverGroupKey,
   removeProfile,
+  resolveApproval,
   resolveCloseRequest,
   startProfileSession,
   stopSigner,
+  updatePeerPolicy,
   updateProfileOperatorSettings,
   updateSettings,
 } from '@/lib/api';
@@ -431,6 +435,18 @@ function extractPendingOperations(runtimeSnapshot: ProfileRuntimeSnapshot | null
     .filter((entry): entry is HomePendingOperation => entry !== null);
 }
 
+function extractPendingApprovals(
+  runtimeSnapshot: ProfileRuntimeSnapshot | null,
+  peers: PeerReadinessRowModel[],
+): PendingApprovalRowModel[] {
+  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
+  const approvals = Array.isArray(runtimeStatus?.pending_approvals) ? runtimeStatus.pending_approvals : [];
+  return buildPendingApprovalRows({
+    approvals,
+    peerAliases: Object.fromEntries(peers.map((row) => [row.pubkey, row.alias])),
+  });
+}
+
 function toLogEntries(lines: string[] = []): LogEntry[] {
   return lines.map((line, index) => ({
     id: `home-log-${index}-${line}`,
@@ -602,6 +618,10 @@ export default function App() {
   const runtimePeers = useMemo(() => extractRuntimePeers(runtimeSnapshot), [runtimeSnapshot]);
   const peerPermissionStates = useMemo(() => extractPeerPermissionStates(runtimeSnapshot), [runtimeSnapshot]);
   const pendingOperations = useMemo(() => extractPendingOperations(runtimeSnapshot), [runtimeSnapshot]);
+  const pendingApprovals = useMemo(
+    () => extractPendingApprovals(runtimeSnapshot, runtimePeers),
+    [runtimeSnapshot, runtimePeers],
+  );
   // Keyset identity (group/share keys + member index) is surfaced by the live
   // runtime status metadata, not the persisted profile manifest.
   const runtimeMetadata = useMemo(
@@ -1221,6 +1241,36 @@ export default function App() {
     }
   }
 
+  async function handleResolveApproval(requestId: string, approved: boolean) {
+    if (!selectedProfileId || !runtimeSnapshot?.active) return;
+    await run('resolving approval', () => resolveApproval(requestId, approved));
+    await refreshRuntime(selectedProfileId);
+  }
+
+  async function handleAlwaysAllowApproval(requestId: string) {
+    if (!selectedProfileId || !runtimeSnapshot?.active) return;
+    const row = pendingApprovals.find((approval) => approval.id === requestId);
+    if (!row) return;
+    // Approve this request, then persist an Allow override so future requests
+    // for this peer+method skip the queue.
+    await run('allowing peer', async () => {
+      await resolveApproval(requestId, true);
+      await updatePeerPolicy(row.pubkey, 'respond', row.method, 'allow');
+    });
+    await refreshRuntime(selectedProfileId);
+  }
+
+  async function handlePeerPolicyChange(
+    pubkey: string,
+    direction: 'request' | 'respond',
+    method: 'ping' | 'onboard' | 'sign' | 'ecdh',
+    value: 'unset' | 'allow' | 'deny' | 'ask',
+  ) {
+    if (!selectedProfileId || !runtimeSnapshot?.active) return;
+    await run('updating peer policy', () => updatePeerPolicy(pubkey, direction, method, value));
+    await refreshRuntime(selectedProfileId);
+  }
+
   async function handleRemoveProfile(profileId: string) {
     const profile = profiles.find((entry) => entry.id === profileId);
     const shouldDelete = await confirm(
@@ -1486,9 +1536,13 @@ export default function App() {
                     memberIdx: runtimeMetadata?.member_idx,
                     running: Boolean(runtimeSnapshot?.active),
                     peers: runtimePeers,
+                    pendingApprovals,
                     pendingOperations,
                     logLines: runtimeSnapshot?.daemon_log_lines,
                   })}
+                  onApproveOnce={(id) => void handleResolveApproval(id, true)}
+                  onDenyApproval={(id) => void handleResolveApproval(id, false)}
+                  onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
                   introMessage="The primary desktop signer should remain running while you distribute and track onboarding packages."
                   runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
                   onPrimaryAction={() =>
@@ -1767,9 +1821,13 @@ export default function App() {
                 memberIdx: runtimeMetadata?.member_idx,
                 running: Boolean(runtimeSnapshot?.active),
                 peers: runtimePeers,
+                pendingApprovals,
                 pendingOperations,
                 logLines: runtimeSnapshot?.daemon_log_lines,
               })}
+              onApproveOnce={(id) => void handleResolveApproval(id, true)}
+              onDenyApproval={(id) => void handleResolveApproval(id, false)}
+              onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
               introMessage="The desktop signer runs through the shell-managed runtime. This dashboard mirrors the same operator workflow used by the PWA host."
               runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
               statusBanner={
@@ -1810,6 +1868,9 @@ export default function App() {
               view={buildPolicyDashboardView(peerPermissionStates, Boolean(runtimeSnapshot?.active))}
               peerDescription="Live outbound and inbound peer policy state for the active desktop signer."
               onRefresh={() => void refreshRuntime(selectedProfileId || null)}
+              onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
+                void handlePeerPolicyChange(pubkey, direction, method, value)
+              }
             />
           ) : null}
 

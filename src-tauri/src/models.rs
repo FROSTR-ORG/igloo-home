@@ -91,6 +91,23 @@ pub struct ImportProfileFromRawInput {
     pub share_package_json: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ResolveApprovalInput {
+    pub request_id: String,
+    pub approved: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePeerPolicyInput {
+    pub pubkey: String,
+    /// `request` | `respond`
+    pub direction: String,
+    /// `ping` | `onboard` | `sign` | `ecdh`
+    pub method: String,
+    /// `unset` | `allow` | `deny` | `ask`
+    pub value: String,
+}
+
 // Secret-bearing IPC input; see note above. Deserialize-only.
 #[derive(Debug, Deserialize)]
 pub struct ImportProfileFromOnboardingInput {

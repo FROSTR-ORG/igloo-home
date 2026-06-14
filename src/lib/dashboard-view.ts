@@ -5,6 +5,7 @@
 // the desktop-host equivalent of igloo-pwa's dashboard view derivation.
 import type {
   PeerReadinessRowModel,
+  PendingApprovalRowModel,
   PendingOperationRowModel,
   PeerPolicyRowModel,
   PolicyMethodOverrideState,
@@ -92,6 +93,7 @@ export function buildSignerDashboardView(input: {
   memberIdx?: number;
   running: boolean;
   peers: PeerReadinessRowModel[];
+  pendingApprovals?: PendingApprovalRowModel[];
   pendingOperations: HomePendingOperation[];
   logLines?: string[];
 }): SignerDashboardViewModel | null {
@@ -106,7 +108,7 @@ export function buildSignerDashboardView(input: {
     readinessLabel: input.running ? 'Signer online' : 'Signer stopped',
     relaySummary: input.running ? 'Desktop runtime connected' : 'Runtime stopped',
     peerRows: input.peers,
-    pendingApprovalRows: [],
+    pendingApprovalRows: input.pendingApprovals ?? [],
     pendingOperationRows: input.pendingOperations.map(toPendingRow),
     eventRows: toEventRows(input.logLines),
   };

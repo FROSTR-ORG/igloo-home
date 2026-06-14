@@ -326,6 +326,23 @@ export function refreshRuntimePeers() {
   return invoke<RuntimePeerRefreshResult>('refresh_runtime_peers_command');
 }
 
+export function resolveApproval(requestId: string, approved: boolean) {
+  return invoke<void>('resolve_approval_command', {
+    input: { request_id: requestId, approved },
+  });
+}
+
+export function updatePeerPolicy(
+  pubkey: string,
+  direction: 'request' | 'respond',
+  method: 'ping' | 'onboard' | 'sign' | 'ecdh',
+  value: 'unset' | 'allow' | 'deny' | 'ask',
+) {
+  return invoke<void>('update_peer_policy_command', {
+    input: { pubkey, direction, method, value },
+  });
+}
+
 export function stopSigner() {
   return invoke<void>('stop_signer_command');
 }

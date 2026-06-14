@@ -13,8 +13,9 @@ use crate::models::{
     ExportProfilePackageInput, FinalizeConnectedOnboardingInput, ImportProfileFromBfprofileInput,
     ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
     ProfileRuntimeSnapshot, RecoverGroupKeyInput, RemoveProfileInput, ResolveCloseRequestInput,
-    RotateKeysetRequest, RuntimePeerRefreshFailure, RuntimePeerRefreshResult,
-    StartProfileSessionRequest, UpdateProfileOperatorSettingsInput,
+    ResolveApprovalInput, RotateKeysetRequest, RuntimePeerRefreshFailure,
+    RuntimePeerRefreshResult, StartProfileSessionRequest, UpdatePeerPolicyInput,
+    UpdateProfileOperatorSettingsInput,
 };
 use crate::profiles;
 use crate::session::{self, AppState};
@@ -255,6 +256,70 @@ pub async fn refresh_runtime_peers(state: &AppState) -> Result<RuntimePeerRefres
         refreshed,
         failures,
     })
+}
+
+fn active_bridge(state: &AppState) -> Result<std::sync::Arc<bifrost_bridge_tokio::Bridge>> {
+    let guard = state.signer.lock().unwrap();
+    guard
+        .active
+        .as_ref()
+        .map(|active| active.bridge.clone())
+        .ok_or_else(|| anyhow::anyhow!("no active signer session"))
+}
+
+pub async fn resolve_approval(state: &AppState, input: ResolveApprovalInput) -> Result<()> {
+    let bridge = active_bridge(state)?;
+    bridge
+        .resolve_approval(input.request_id, input.approved)
+        .await?;
+    Ok(())
+}
+
+pub async fn update_peer_policy(state: &AppState, input: UpdatePeerPolicyInput) -> Result<()> {
+    use bifrost_core::types::PolicyOverrideValue;
+
+    let value = match input.value.as_str() {
+        "unset" => PolicyOverrideValue::Unset,
+        "allow" => PolicyOverrideValue::Allow,
+        "deny" => PolicyOverrideValue::Deny,
+        "ask" => PolicyOverrideValue::Ask,
+        other => bail!("invalid policy override value: {other}"),
+    };
+    if input.direction != "request" && input.direction != "respond" {
+        bail!("invalid policy direction: {}", input.direction);
+    }
+    if !["ping", "onboard", "sign", "ecdh"].contains(&input.method.as_str()) {
+        bail!("invalid policy method: {}", input.method);
+    }
+
+    let peer = input.pubkey.to_lowercase();
+    let bridge = active_bridge(state)?;
+
+    // Start from the peer's current manual override so we patch a single field
+    // rather than clobbering the rest (mirrors the WASM bridge's set_policy_override).
+    let mut override_policy = bridge
+        .peer_permission_states()
+        .await?
+        .into_iter()
+        .find(|entry| entry.pubkey == peer)
+        .map(|entry| entry.manual_override)
+        .unwrap_or_default();
+
+    let target = if input.direction == "request" {
+        &mut override_policy.request
+    } else {
+        &mut override_policy.respond
+    };
+    match input.method.as_str() {
+        "ping" => target.ping = value,
+        "onboard" => target.onboard = value,
+        "sign" => target.sign = value,
+        "ecdh" => target.ecdh = value,
+        _ => unreachable!("method validated above"),
+    }
+
+    bridge.set_policy_override(peer, override_policy).await?;
+    Ok(())
 }
 
 pub async fn stop_signer(app: &tauri::AppHandle, state: &AppState, reason: &str) -> Result<()> {
@@ -523,6 +588,22 @@ pub async fn refresh_runtime_peers_command(
     state: State<'_, AppState>,
 ) -> std::result::Result<RuntimePeerRefreshResult, HomeError> {
     Ok(refresh_runtime_peers(state.inner()).await?)
+}
+
+#[tauri::command]
+pub async fn resolve_approval_command(
+    state: State<'_, AppState>,
+    input: ResolveApprovalInput,
+) -> std::result::Result<(), HomeError> {
+    Ok(resolve_approval(state.inner(), input).await?)
+}
+
+#[tauri::command]
+pub async fn update_peer_policy_command(
+    state: State<'_, AppState>,
+    input: UpdatePeerPolicyInput,
+) -> std::result::Result<(), HomeError> {
+    Ok(update_peer_policy(state.inner(), input).await?)
 }
 
 #[tauri::command]

@@ -635,9 +635,13 @@ export default function App() {
   const runtimeMetadata = runtimeStatusSummary?.metadata ?? null;
   // request_id of a signing-failed banner the operator dismissed.
   const [dismissedSignFailureId, setDismissedSignFailureId] = useState<string | null>(null);
+  // Set when starting the managed daemon fails (no runtime to query), so the
+  // dashboard shows the full-panel load-failed screen. Cleared on success/stop.
+  const [dashboardLoadError, setDashboardLoadError] = useState<{ message: string; at: number } | null>(null);
   const dashboardState = deriveDashboardState({
     active: Boolean(runtimeSnapshot?.active),
     status: runtimeStatusSummary,
+    loadError: dashboardLoadError,
     dismissedSignFailureId,
   });
 
@@ -1200,12 +1204,26 @@ export default function App() {
     if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id !== profileId) {
       await stopSigner();
     }
-    const snapshot = await run('starting managed profile', () =>
-      startProfileSession({
-        profileId,
-        passphrase: sessionPassphrase,
-      }),
-    );
+    let snapshot;
+    try {
+      snapshot = await run('starting managed profile', () =>
+        startProfileSession({
+          profileId,
+          passphrase: sessionPassphrase,
+        }),
+      );
+    } catch (err) {
+      // The daemon never came up to be queried, so surface the failure as the
+      // full-panel load-failed screen on the dashboard (Retry) in addition to
+      // the transient error banner `run()` already set. The failure is fully
+      // surfaced via state, so we don't rethrow — the fire-and-forget
+      // onPrimaryAction call sites would otherwise leak an unhandled rejection.
+      setDashboardLoadError({ message: formatError(err), at: Math.floor(Date.now() / 1000) });
+      setActiveView('dashboard');
+      setActiveDashboardTab('signer');
+      return;
+    }
+    setDashboardLoadError(null);
     setPeerRefreshSummary(null);
     setRuntimeSnapshot(snapshot);
     setActiveView(nextView);
@@ -1228,6 +1246,7 @@ export default function App() {
 
   async function handleStopProfileSession() {
     setPeerRefreshSummary(null);
+    setDashboardLoadError(null);
     await run('stopping managed profile', async () => {
       await stopSigner();
       await refreshRuntime(selectedProfileId || null);

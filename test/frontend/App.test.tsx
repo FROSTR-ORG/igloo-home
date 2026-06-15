@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const currentVisualScenario = vi.hoisted(() => ({
@@ -234,6 +234,26 @@ describe('igloo-home landing shell', () => {
     expect(screen.getByText('Refreshed 2 of 3 peers. 1 peer refresh failed.')).toBeInTheDocument();
     expect(screen.getByText(/peer-2/i)).toBeInTheDocument();
     expect(screen.getByText(/ping timeout/i)).toBeInTheDocument();
+  });
+
+  it('shows the load-failed screen when starting the managed signer fails', async () => {
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'dashboard',
+      activeDashboardTab: 'signer',
+      runtimeSnapshot: null,
+    };
+    apiMocks.startProfileSession.mockRejectedValue(new Error('daemon failed to start'));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start Signer' }));
+
+    // The failed start routes to the dashboard's full-panel load-failed screen
+    // (the message also appears in the top-level error banner — assert the
+    // screen's copy specifically).
+    const loadFailed = await screen.findByTestId('dashboard-load-failed');
+    expect(within(loadFailed).getByText(/daemon failed to start/i)).toBeInTheDocument();
   });
 
   it('clears the peer refresh summary after the signer stops', async () => {

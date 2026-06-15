@@ -1394,7 +1394,9 @@ export default function App() {
       />
 
       {busy ? <div className="igloo-message-muted">Working: {busy}</div> : null}
-      {error ? <div className="igloo-shell-alert">{error}</div> : null}
+      {/* Suppress the top-level banner when a start failure is showing as the
+          full-panel load-failed screen (it carries the same message). */}
+      {error && !dashboardLoadError ? <div className="igloo-shell-alert">{error}</div> : null}
       {notice ? <div className="igloo-message-muted">{notice}</div> : null}
 
       {activeView === 'landing' ? (

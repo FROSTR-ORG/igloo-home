@@ -17,6 +17,10 @@ import {
   buildPeerReadinessRows,
   buildPendingApprovalRows,
   HostFlowShell,
+  DashboardConditionBanner,
+  DashboardLoadFailedScreen,
+  DashboardLoadingScreen,
+  deriveDashboardState,
   OperatorDashboardTabs,
   OperatorPermissionsPanel,
   OperatorSettingsPanel,
@@ -624,10 +628,18 @@ export default function App() {
   );
   // Keyset identity (group/share keys + member index) is surfaced by the live
   // runtime status metadata, not the persisted profile manifest.
-  const runtimeMetadata = useMemo(
-    () => parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null)?.metadata ?? null,
+  const runtimeStatusSummary = useMemo(
+    () => parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null),
     [runtimeSnapshot],
   );
+  const runtimeMetadata = runtimeStatusSummary?.metadata ?? null;
+  // request_id of a signing-failed banner the operator dismissed.
+  const [dismissedSignFailureId, setDismissedSignFailureId] = useState<string | null>(null);
+  const dashboardState = deriveDashboardState({
+    active: Boolean(runtimeSnapshot?.active),
+    status: runtimeStatusSummary,
+    dismissedSignFailureId,
+  });
 
   useEffect(() => {
     setSettingsDraft(detectSettingsDraft(selectedProfile));
@@ -1813,6 +1825,34 @@ export default function App() {
             />
 
           {activeDashboardTab === 'signer' ? (
+            dashboardState.kind === 'loading' ? (
+              <DashboardLoadingScreen detail={dashboardState.detail} />
+            ) : dashboardState.kind === 'load-failed' ? (
+              <DashboardLoadFailedScreen
+                message={dashboardState.message}
+                timestampLabel={
+                  dashboardState.at ? new Date(dashboardState.at * 1000).toLocaleString() : undefined
+                }
+                onRetry={() => void handleStartProfileSession()}
+              />
+            ) : (
+            <>
+              {dashboardState.banners.map((banner) => (
+                <DashboardConditionBanner
+                  key={banner.kind}
+                  banner={banner}
+                  timestampLabel={
+                    banner.kind === 'signing-failed'
+                      ? new Date(banner.at * 1000).toLocaleString()
+                      : undefined
+                  }
+                  onDismiss={
+                    banner.kind === 'signing-failed'
+                      ? () => setDismissedSignFailureId(banner.requestId)
+                      : undefined
+                  }
+                />
+              ))}
             <OperatorSignerPanel
               view={buildSignerDashboardView({
                 profileName: selectedProfile?.label ?? null,
@@ -1861,6 +1901,8 @@ export default function App() {
               onRefreshPeers={() => void handleRefreshRuntimePeers()}
               refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
             />
+            </>
+            )
           ) : null}
 
           {activeDashboardTab === 'permissions' ? (

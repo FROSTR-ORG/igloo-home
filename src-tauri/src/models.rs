@@ -48,23 +48,63 @@ pub struct RotateKeysetRequest {
     pub sources: Vec<RotationSourceInput>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One generated share returned to the frontend. `share_package_json` carries the
+/// raw secret share, so the field zeroizes on drop and is redacted in `Debug`
+/// (mirroring [`RecoveredGroupKey`]); the rest are public metadata.
+#[derive(Serialize, Zeroize, ZeroizeOnDrop)]
 pub struct GeneratedKeysetShare {
+    #[zeroize(skip)]
     pub name: String,
+    #[zeroize(skip)]
     pub member_idx: u16,
+    #[zeroize(skip)]
     pub share_public_key: String,
     pub share_package_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl std::fmt::Debug for GeneratedKeysetShare {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeneratedKeysetShare")
+            .field("name", &self.name)
+            .field("member_idx", &self.member_idx)
+            .field("share_public_key", &self.share_public_key)
+            .field("share_package_json", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Freshly-generated keyset returned to the frontend. The secret material (the group
+/// `nsec` and each share's `share_package_json`) zeroizes on drop — scrubbing the
+/// Rust-side heap copy once the IPC layer has serialized the response — and is redacted
+/// in `Debug`, matching [`RecoveredGroupKey`].
+#[derive(Serialize, Zeroize, ZeroizeOnDrop)]
 pub struct GeneratedKeyset {
+    #[zeroize(skip)]
     pub source: String,
+    #[zeroize(skip)]
     pub threshold: u16,
+    #[zeroize(skip)]
     pub count: u16,
+    #[zeroize(skip)]
     pub group_package_json: String,
+    #[zeroize(skip)]
     pub group_public_key: String,
     pub nsec: String,
     pub shares: Vec<GeneratedKeysetShare>,
+}
+
+impl std::fmt::Debug for GeneratedKeyset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeneratedKeyset")
+            .field("source", &self.source)
+            .field("threshold", &self.threshold)
+            .field("count", &self.count)
+            .field("group_package_json", &self.group_package_json)
+            .field("group_public_key", &self.group_public_key)
+            .field("nsec", &"<redacted>")
+            .field("shares", &self.shares)
+            .finish()
+    }
 }
 
 // Secret-bearing IPC input. Holds a `Passphrase`, so it drops `Clone` and
@@ -384,4 +424,36 @@ impl From<ProfilePreview> for OnboardingPreview {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectedOnboardingPreview {
     pub preview: OnboardingPreview,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The generated-keyset secrets must not leak through `Debug` (logs/panics),
+    // mirroring `RecoveredGroupKey`. Public metadata stays visible.
+    #[test]
+    fn generated_keyset_debug_redacts_secrets() {
+        let keyset = GeneratedKeyset {
+            source: "generated".to_string(),
+            threshold: 2,
+            count: 3,
+            group_package_json: "{\"group\":true}".to_string(),
+            group_public_key: "deadbeef".to_string(),
+            nsec: "nsec1secretvalue".to_string(),
+            shares: vec![GeneratedKeysetShare {
+                name: "device-1".to_string(),
+                member_idx: 1,
+                share_public_key: "abc123".to_string(),
+                share_package_json: "{\"seckey\":\"super-secret\"}".to_string(),
+            }],
+        };
+        let rendered = format!("{keyset:?}");
+        assert!(!rendered.contains("nsec1secretvalue"), "nsec leaked: {rendered}");
+        assert!(!rendered.contains("super-secret"), "share secret leaked: {rendered}");
+        assert!(rendered.contains("<redacted>"));
+        // Public metadata remains visible for diagnostics.
+        assert!(rendered.contains("deadbeef"));
+        assert!(rendered.contains("device-1"));
+    }
 }

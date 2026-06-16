@@ -742,6 +742,18 @@ export default function App() {
     }
   }, [activeView]);
 
+  // Clear the generated keyset + its secret-bearing form drafts whenever the
+  // operator leaves the create view, so the group nsec / raw shares / chosen
+  // passphrases do not linger in app state (mirrors the recover-key cleanup).
+  useEffect(() => {
+    if (activeView !== 'create') {
+      setGeneratedKeyset(null);
+      setSelectedGeneratedShareIdx(null);
+      setSaveForms({});
+      setDistributionForms({});
+    }
+  }, [activeView]);
+
   // Load the selected profile's recovery threshold (from its plaintext group
   // package) so the collected-shares meter is accurate.
   useEffect(() => {

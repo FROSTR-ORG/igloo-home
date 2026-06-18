@@ -501,8 +501,13 @@ function DesktopSettingsExtras({
 export default function App() {
   const visualScenario = useMemo(() => resolveVisualScenario(), []);
   useEffect(() => {
+    // The test bridge calls Tauri `invoke()` at mount, which throws in a plain
+    // browser. Skip it under a visual scenario so the frontend renders headlessly
+    // (e.g. `make screenshot CLIENT=home`); all other Tauri calls are already
+    // guarded by `if (visualScenario) return`.
+    if (visualScenario) return;
     installTestBridge();
-  }, []);
+  }, [visualScenario]);
 
   const [activeView, setActiveView] = useState<ViewKey>(visualScenario?.activeView ?? 'landing');
   const [activeDashboardTab, setActiveDashboardTab] = useState<DashboardTab>(

@@ -80,5 +80,4 @@ refresh fully succeeded or only partially completed.
 - workspace test harness:
   - full end-to-end desktop flows
 
-Repo-local public scripts now route through the shared workspace prep helper, so
-manual `npm run build:ui` is only needed for low-level debugging.
+Repo-local public scripts now route through the shared workspace prep helper.

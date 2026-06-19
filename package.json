@@ -6,7 +6,6 @@
   "scripts": {
     "prepare:workspace": "bash ../../scripts/test-prebuild.sh ensure ui",
     "prepare:e2e": "bash ../../scripts/test-prebuild.sh ensure home demo",
-    "build:ui": "npm --prefix ../igloo-ui run build",
     "build:app": "tsc && vite build && node ./scripts/check-built-css.mjs",
     "dev:raw": "vite --host 0.0.0.0 --port 1420 --strictPort",
     "dev": "npm run prepare:workspace && npm run dev:raw",

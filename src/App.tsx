@@ -10,8 +10,10 @@ import type {
 } from 'igloo-shared';
 import { parseRuntimeStatus } from '@/lib/runtime-status';
 import {
+  Alert,
   AppHeader,
   Button,
+  Checkbox,
   ContentCard,
   HostEntryTile,
   buildPeerReadinessRows,
@@ -471,28 +473,18 @@ function DesktopSettingsExtras({
   return (
     <ContentCard title="Desktop Lifecycle Settings" description="Tray handling, launch behavior, and session restoration.">
       <div className="igloo-settings-grid">
-        <label className="igloo-toggle-row">
-          <input
-            type="checkbox"
-            checked={settings.close_to_tray}
-            onChange={event => onToggle('close_to_tray', event.target.checked)}
-          />
-          <span>
-            <strong>Close to tray</strong>
-            <small>Hide the window instead of prompting to stop the active signer session.</small>
-          </span>
-        </label>
-        <label className="igloo-toggle-row">
-          <input
-            type="checkbox"
-            checked={settings.launch_on_login}
-            onChange={event => onToggle('launch_on_login', event.target.checked)}
-          />
-          <span>
-            <strong>Launch on login</strong>
-            <small>Register the desktop app at system startup without unlocking a profile automatically.</small>
-          </span>
-        </label>
+        <Checkbox
+          checked={settings.close_to_tray}
+          onCheckedChange={(checked) => onToggle('close_to_tray', checked)}
+          label="Close to tray"
+          description="Hide the window instead of prompting to stop the active signer session."
+        />
+        <Checkbox
+          checked={settings.launch_on_login}
+          onCheckedChange={(checked) => onToggle('launch_on_login', checked)}
+          label="Launch on login"
+          description="Register the desktop app at system startup without unlocking a profile automatically."
+        />
       </div>
     </ContentCard>
   );
@@ -1413,7 +1405,7 @@ export default function App() {
       {busy ? <div className="igloo-message-muted">Working: {busy}</div> : null}
       {/* Suppress the top-level banner when a start failure is showing as the
           full-panel load-failed screen (it carries the same message). */}
-      {error && !dashboardLoadError ? <div className="igloo-shell-alert">{error}</div> : null}
+      {error && !dashboardLoadError ? <Alert tone="danger">{error}</Alert> : null}
       {notice ? <div className="igloo-message-muted">{notice}</div> : null}
 
       {activeView === 'landing' ? (
@@ -1574,9 +1566,7 @@ export default function App() {
             distributionBeforeCards={selectedProfile ? (
               <>
                 {!runtimeSnapshot?.active ? (
-                  <div className="igloo-shell-alert">
-                    Live onboarding tracking is paused until the host signer is running.
-                  </div>
+                  <Alert tone="default">Live onboarding tracking is paused until the host signer is running.</Alert>
                 ) : null}
                 <OperatorSignerPanel
                   view={buildSignerDashboardView({

@@ -6,6 +6,12 @@ import type {
   ProfileRuntimeSnapshot,
   RecoveredGroupKey,
 } from '@/lib/types';
+import {
+  FIXTURE_PROFILE_ID,
+  FIXTURE_PROFILE_LABEL,
+  FIXTURE_RELAY,
+  createFixtureRuntimeStatusSummary,
+} from 'igloo-shared/testing/dev-fixtures';
 
 export type VisualScenarioName =
   | 'landing'
@@ -91,8 +97,8 @@ type VisualScenarioState = {
 
 const sampleProfiles: ProfileManifest[] = [
   {
-    id: 'alice-laptop',
-    label: 'Alice Laptop',
+    id: FIXTURE_PROFILE_ID,
+    label: FIXTURE_PROFILE_LABEL,
     group_ref: 'managed/group/alice.json',
     encrypted_profile_ref: 'encrypted-profile:alice',
     relay_profile: 'default',
@@ -150,11 +156,7 @@ const sampleGeneratedKeyset: GeneratedKeyset = {
 const sampleRuntimeSnapshot: ProfileRuntimeSnapshot = {
   active: true,
   profile: sampleProfiles[0],
-  runtime_status: {
-    state: 'online',
-    pending_ops: 1,
-    known_peers: 2,
-  },
+  runtime_status: createFixtureRuntimeStatusSummary(),
   readiness: {
     ready: true,
     sign_ready_peers: 2,
@@ -170,7 +172,7 @@ const sampleRuntimeSnapshot: ProfileRuntimeSnapshot = {
     '[info] nonce pool refreshed',
   ],
   daemon_metadata: {
-    profile_id: sampleProfiles[0].id,
+    profile_id: FIXTURE_PROFILE_ID,
     pid: 42424,
     socket_path: '/tmp/igloo-home-alice.sock',
     token: 'visual-preview',
@@ -191,7 +193,7 @@ const baseState: VisualScenarioState = {
     {
       id: 'default',
       label: 'Default',
-      relays: ['wss://relay.primal.net', 'wss://relay.damus.io'],
+      relays: [FIXTURE_RELAY],
     },
   ],
   selectedProfileId: sampleProfiles[0].id,
@@ -240,7 +242,7 @@ const baseState: VisualScenarioState = {
     packagePassword: 'preview-password',
     packageText: 'bfprofile1visualpreview',
   },
-  recoverProfileId: 'alice-laptop',
+  recoverProfileId: FIXTURE_PROFILE_ID,
   recoverDevicePassphrase: '',
   recoverSources: [{ packageText: '', packagePassword: '' }],
   recoveredKey: null,

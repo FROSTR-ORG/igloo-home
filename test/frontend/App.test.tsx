@@ -175,10 +175,12 @@ describe('igloo-home landing shell', () => {
     };
     render(<App />);
 
-    expect(screen.getByText('Choose one path to initialize this desktop workspace.')).toBeInTheDocument();
+    // The landing now renders WelcomeReturningHero when profiles are present.
+    expect(screen.getByText('Igloo Home')).toBeInTheDocument();
     expect(screen.getAllByText('Alice Laptop').length).toBeGreaterThan(0);
+    // Unlock button per profile row; Load Profile in secondary actions.
+    expect(screen.getAllByRole('button', { name: 'Unlock' }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: 'Load Profile' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: 'Delete Profile' }).length).toBeGreaterThan(0);
     expect(screen.queryByText(/inventory/i)).not.toBeInTheDocument();
   });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { confirm } from '@tauri-apps/plugin-dialog';
 import { shortProfileId } from '@/lib/profileIdentity';
@@ -15,7 +15,6 @@ import {
   Button,
   Checkbox,
   ContentCard,
-  HostEntryTile,
   buildPeerReadinessRows,
   buildPendingApprovalRows,
   HostFlowShell,
@@ -35,14 +34,18 @@ import {
   RecoverCollectSharesPanel,
   SensitiveTextarea,
   StepProgress,
-  StoredProfilesLandingCard,
   Textarea,
+  WelcomeDeleteModal,
+  WelcomeEntryHero,
+  WelcomeReturningHero,
+  WelcomeUnlockModal,
   type LogEntry,
   type OperatorSignerSettings,
   type SharedDistributionAction,
   type SharedDistributionResult,
   type SharedDistributionStatus,
   type SharedRecoverSource,
+  type WelcomeReturningProfileModel,
 } from 'igloo-ui';
 import {
   buildPolicyDashboardView,
@@ -214,6 +217,29 @@ function unwrapImportedProfile(result: ProfileImportResult) {
     throw new Error('expected the onboarding flow to create a managed profile');
   }
   return result.profile;
+}
+
+const iglooLogoSrc = '/igloo-paper-mark.png';
+
+function formatWelcomeKey(value: string) {
+  if (value.length <= 16) return value;
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+function deriveHomeReturningProfile(profile: ProfileManifest): WelcomeReturningProfileModel {
+  return {
+    id: profile.id,
+    label: profile.label || 'My Desktop Key',
+    // Home's ProfileManifest does not carry group_package_json / member_idx /
+    // share_public_key at the manifest level — those live inside the encrypted
+    // profile artifact. Fall back to display-friendly placeholders.
+    thresholdLabel: '—',
+    memberLabel: '—',
+    publicKeyLabel: formatWelcomeKey(profile.id),
+    canRotate: true,
+    canRecover: true,
+    canDelete: true,
+  };
 }
 
 function detectSettingsDraft(profile: ProfileManifest | null): RuntimeOptionsDraft {
@@ -518,7 +544,11 @@ export default function App() {
   const [relayProfiles, setRelayProfiles] = useState<RelayProfile[]>(visualScenario?.relayProfiles ?? []);
   const [selectedProfileId, setSelectedProfileId] = useState(visualScenario?.selectedProfileId ?? '');
   const [passphrase, setPassphrase] = useState(visualScenario?.passphrase ?? '');
-  const [landingPassphrases, setLandingPassphrases] = useState<Record<string, string>>({});
+  const [welcomeUnlockProfileId, setWelcomeUnlockProfileId] = useState<string | null>(null);
+  const [welcomeUnlockPassword, setWelcomeUnlockPassword] = useState('');
+  const [welcomeUnlockError, setWelcomeUnlockError] = useState<string | null>(null);
+  const [welcomeUnlockSubmitting, setWelcomeUnlockSubmitting] = useState(false);
+  const [welcomeDeleteProfileId, setWelcomeDeleteProfileId] = useState<string | null>(null);
   const [generatedKeyset, setGeneratedKeyset] = useState<GeneratedKeyset | null>(visualScenario?.generatedKeyset ?? null);
   const [createForm, setCreateForm] = useState(
     {
@@ -630,6 +660,16 @@ export default function App() {
     [runtimeSnapshot],
   );
   const runtimeMetadata = runtimeStatusSummary?.metadata ?? null;
+
+  const welcomeUnlockProfileModel = useMemo(() => {
+    const p = profiles.find((entry) => entry.id === welcomeUnlockProfileId);
+    return p ? deriveHomeReturningProfile(p) : null;
+  }, [profiles, welcomeUnlockProfileId]);
+  const welcomeDeleteProfileModel = useMemo(() => {
+    const p = profiles.find((entry) => entry.id === welcomeDeleteProfileId);
+    return p ? deriveHomeReturningProfile(p) : null;
+  }, [profiles, welcomeDeleteProfileId]);
+
   // request_id of a signing-failed banner the operator dismissed.
   const [dismissedSignFailureId, setDismissedSignFailureId] = useState<string | null>(null);
   // Set when starting the managed daemon fails (no runtime to query), so the
@@ -1241,14 +1281,70 @@ export default function App() {
     }
   }
 
-  async function handleLoadLandingProfile(profileId: string) {
+  function openWelcomeUnlock(profileId: string) {
+    setWelcomeUnlockProfileId(profileId);
+    setWelcomeUnlockPassword('');
+    setWelcomeUnlockError(null);
+    setWelcomeUnlockSubmitting(false);
+  }
+
+  function closeWelcomeUnlock() {
+    setWelcomeUnlockProfileId(null);
+    setWelcomeUnlockPassword('');
+    setWelcomeUnlockError(null);
+    setWelcomeUnlockSubmitting(false);
+  }
+
+  async function submitWelcomeUnlock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!welcomeUnlockProfileId) return;
+    try {
+      setWelcomeUnlockSubmitting(true);
+      setWelcomeUnlockError(null);
+      await handleLoadLandingProfile(welcomeUnlockProfileId, welcomeUnlockPassword);
+      closeWelcomeUnlock();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      setWelcomeUnlockError(
+        /incorrect passphrase/i.test(message)
+          ? 'Incorrect password. Please try again.'
+          : message || 'Could not unlock this device.',
+      );
+    } finally {
+      setWelcomeUnlockSubmitting(false);
+    }
+  }
+
+  function openWelcomeDelete(profileId: string) {
+    setWelcomeDeleteProfileId(profileId);
+  }
+
+  function closeWelcomeDelete() {
+    setWelcomeDeleteProfileId(null);
+  }
+
+  async function confirmWelcomeDelete() {
+    if (!welcomeDeleteProfileId) return;
+    const profileId = welcomeDeleteProfileId;
+    setWelcomeDeleteProfileId(null);
+    await run('removing managed profile', async () => {
+      if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id === profileId) {
+        await stopSigner();
+      }
+      await removeProfile(profileId);
+      await refreshProfiles(selectedProfileId === profileId ? null : selectedProfileId);
+      await refreshRuntime(null);
+    });
+  }
+
+  async function handleLoadLandingProfile(profileId: string, providedPassphrase?: string) {
     setSelectedProfileId(profileId);
     if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id === profileId) {
       setActiveView('dashboard');
       setActiveDashboardTab('signer');
       return;
     }
-    const sessionPassphrase = landingPassphrases[profileId] ?? passphrase;
+    const sessionPassphrase = providedPassphrase ?? passphrase;
     setPassphrase(sessionPassphrase);
     await handleStartProfileSession(profileId, sessionPassphrase);
   }
@@ -1398,10 +1494,27 @@ export default function App() {
     <PageLayout maxWidth="max-w-6xl">
       <AppHeader
         mode={activeView === 'dashboard' ? 'dashboard' : activeView === 'landing' ? 'welcome' : 'task'}
+        logoSrc={iglooLogoSrc}
         taskLabel="Igloo Home"
         profileName={selectedProfile?.label}
       />
 
+      <WelcomeUnlockModal
+        open={Boolean(welcomeUnlockProfileId)}
+        profile={welcomeUnlockProfileModel}
+        password={welcomeUnlockPassword}
+        error={welcomeUnlockError}
+        submitting={welcomeUnlockSubmitting}
+        onPasswordChange={(v) => { setWelcomeUnlockPassword(v); setWelcomeUnlockError(null); }}
+        onSubmit={(e) => void submitWelcomeUnlock(e)}
+        onClose={closeWelcomeUnlock}
+      />
+      <WelcomeDeleteModal
+        open={Boolean(welcomeDeleteProfileId)}
+        profile={welcomeDeleteProfileModel}
+        onConfirm={() => void confirmWelcomeDelete()}
+        onClose={closeWelcomeDelete}
+      />
       {busy ? <div className="igloo-message-muted">Working: {busy}</div> : null}
       {/* Suppress the top-level banner when a start failure is showing as the
           full-panel load-failed screen (it carries the same message). */}
@@ -1409,91 +1522,40 @@ export default function App() {
       {notice ? <div className="igloo-message-muted">{notice}</div> : null}
 
       {activeView === 'landing' ? (
-        <ContentCard title="Welcome to Igloo" description="Choose one path to initialize this desktop workspace.">
-          <section className="igloo-flow-root igloo-entry-shell">
-            <div className="igloo-entry-intro">
-              <p className="igloo-entry-lead">
-                Create or rotate a keyset, load an existing profile, or finish onboarding a device from an accepted package.
-              </p>
-            </div>
-            <StoredProfilesLandingCard
-              profiles={profiles.map((profile) => ({
-                id: profile.id,
-                label: profile.label || 'Unnamed device',
-                shortId: shortProfileId(profile.id),
-                state: activeProfileId === profile.id ? 'active' : 'available',
-                primaryActionLabel: activeProfileId === profile.id ? 'Open Dashboard' : 'Load Profile',
-                destructiveActionLabel: 'Delete Profile',
-              }))}
-              description="Managed desktop profiles remain available while locked. Enter the passphrase below before loading one."
-              selectedProfileId={selectedProfileId}
-              onSelect={setSelectedProfileId}
-              onLoad={(profileId) => void handleLoadLandingProfile(profileId)}
-              onDelete={(profileId) => void handleRemoveProfile(profileId)}
-              renderProfileDetail={(profile, isSelected) => (
-                <div className="igloo-stack">
-                  <label>
-                    Passphrase
-                    <input
-                      type="password"
-                      value={landingPassphrases[profile.id] ?? (isSelected ? passphrase : '')}
-                      onFocus={() => setSelectedProfileId(profile.id)}
-                      onChange={event => {
-                        const value = event.target.value;
-                        setLandingPassphrases((current) => ({ ...current, [profile.id]: value }));
-                        if (isSelected) {
-                          setPassphrase(value);
-                        }
-                      }}
-                      placeholder="Required to unlock this desktop profile"
-                    />
-                  </label>
-                  <p className="igloo-message-muted">
-                    Use the shell passphrase for this desktop profile to unlock and start the signer session.
-                  </p>
-                </div>
-              )}
-            />
-            <div className="igloo-entry-grid">
-              <HostEntryTile
-                kicker="Fresh setup"
-                title="Create / Rotate Keyset"
-                description="Generate new share material or rotate an existing keyset, save one local desktop device, and distribute the remaining shares."
-                actionLabel="Start"
-                tone="primary"
-                onAction={() => setActiveView('create')}
-                icon={<svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 1 1 9.74 1.58L21 15v2h-2v2h-2v2h-3v-3.17a5 5 0 0 1-7-4.83Z" /><circle cx="10" cy="10" r="1.25" /></svg>}
-              />
-              <HostEntryTile
-                kicker="Existing device"
-                title="Load Profile"
-                description="Import a full `bfprofile` package to restore a desktop device into the local store."
-                actionLabel="Load Profile"
-                onAction={() => setActiveView('load')}
-                icon={<svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.97 3.06 8.77 8 10 4.94-1.23 8-5.03 8-10V7l-8-4Z" /><path d="M12 8v6m0 0 3-3m-3 3-3-3" /></svg>}
-              />
-              <HostEntryTile
-                kicker="Threshold of shares"
-                title="Recover Group Key"
-                description="Reconstruct the group secret key (nsec) locally from a threshold of shares — this device plus pasted `bfshare`s. No relay."
-                actionLabel="Recover Key"
-                onAction={() => {
-                  setRecoveredKey(null);
-                  setActiveView('recover-key');
-                }}
-                icon={<svg viewBox="0 0 24 24"><path d="M7 10a5 5 0 1 1 9.74 1.58L21 15v2h-2v2h-2v2h-3v-3.17a5 5 0 0 1-7-4.83Z" /><circle cx="10" cy="10" r="1.25" /></svg>}
-              />
-              <HostEntryTile
-                kicker="Accepted invite"
-                title="Onboard Device"
-                description="Use a password-protected `bfonboard` package to complete native onboarding and save the resulting profile."
-                actionLabel="Continue Onboarding"
-                onAction={() => setActiveView('onboard-connect')}
-                icon={<svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="2" /><path d="M9 8h6M9 12h6M12 16h.01" /></svg>}
-              />
-            </div>
-          </section>
-        </ContentCard>
+        profiles.length === 0 ? (
+          <WelcomeEntryHero
+            logoSrc={iglooLogoSrc}
+            productLabel="Igloo Home"
+            tagline="Threshold signing for your desktop."
+            primaryAction={{
+              heading: 'Create / Rotate Keyset',
+              description: 'Generate new share material or rotate an existing keyset, save one local desktop device, and distribute the remaining shares.',
+              buttonLabel: 'Start',
+              onAction: () => setActiveView('create'),
+            }}
+            secondaryActions={[
+              { id: 'load', label: 'Load Profile', onAction: () => setActiveView('load') },
+              { id: 'recover', label: 'Recover Group Key', onAction: () => { setRecoveredKey(null); setActiveView('recover-key'); } },
+              { id: 'onboard', label: 'Onboard Device', onAction: () => setActiveView('onboard-connect') },
+            ]}
+          />
+        ) : (
+          <WelcomeReturningHero
+            logoSrc={iglooLogoSrc}
+            productLabel="Igloo Home"
+            layout={profiles.length === 1 ? 'single' : profiles.length <= 3 ? 'multi' : 'many'}
+            profiles={profiles.map(deriveHomeReturningProfile)}
+            onUnlock={openWelcomeUnlock}
+            onRotate={(profileId) => { setSelectedProfileId(profileId); setActiveView('create'); }}
+            onRecover={(profileId) => { setRecoveredKey(null); setRecoverProfileId(profileId); setActiveView('recover-key'); }}
+            onDelete={openWelcomeDelete}
+            secondaryActions={[
+              { id: 'load', label: 'Load Profile', onAction: () => setActiveView('load') },
+              { id: 'recover', label: 'Recover Group Key', onAction: () => { setRecoveredKey(null); setActiveView('recover-key'); } },
+              { id: 'onboard', label: 'Onboard Device', onAction: () => setActiveView('onboard-connect') },
+            ]}
+          />
+        )
       ) : null}
 
       {activeView === 'create' ? (
@@ -1590,7 +1652,7 @@ export default function App() {
                       ? handleStopProfileSession()
                       : handleStartProfileSession(
                           selectedProfile.id,
-                          passphrase || landingPassphrases[selectedProfile.id] || '',
+                          passphrase,
                           'create',
                         ))
                   }

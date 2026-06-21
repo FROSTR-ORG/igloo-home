@@ -1513,7 +1513,6 @@ export default function App() {
             }}
             secondaryActions={[
               { id: 'load', label: 'Load Profile', onAction: () => setActiveView('load') },
-              { id: 'recover', label: 'Recover Group Key', onAction: () => { setRecoveredKey(null); setActiveView('recover-key'); } },
               { id: 'onboard', label: 'Onboard Device', onAction: () => setActiveView('onboard-connect') },
             ]}
           />
@@ -1529,7 +1528,6 @@ export default function App() {
             onDelete={openWelcomeDelete}
             secondaryActions={[
               { id: 'load', label: 'Load Profile', onAction: () => setActiveView('load') },
-              { id: 'recover', label: 'Recover Group Key', onAction: () => { setRecoveredKey(null); setActiveView('recover-key'); } },
               { id: 'onboard', label: 'Onboard Device', onAction: () => setActiveView('onboard-connect') },
             ]}
           />

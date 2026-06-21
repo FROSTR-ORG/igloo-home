@@ -1621,7 +1621,6 @@ export default function App() {
                   onApproveOnce={(id) => void handleResolveApproval(id, true)}
                   onDenyApproval={(id) => void handleResolveApproval(id, false)}
                   onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
-                  introMessage="The primary desktop signer should remain running while you distribute and track onboarding packages."
                   runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
                   onPrimaryAction={() =>
                     void (runtimeSnapshot?.active
@@ -1934,7 +1933,6 @@ export default function App() {
               onApproveOnce={(id) => void handleResolveApproval(id, true)}
               onDenyApproval={(id) => void handleResolveApproval(id, false)}
               onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
-              introMessage="The desktop signer runs through the shell-managed runtime. This dashboard mirrors the same operator workflow used by the PWA host."
               runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
               statusBanner={
                 peerRefreshSummary ? (

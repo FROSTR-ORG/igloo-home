@@ -7,7 +7,8 @@ use crate::models::{
     CreateKeysetRequest, ExportProfileInput, ExportProfilePackageInput,
     FinalizeConnectedOnboardingInput, ImportProfileFromBfprofileInput,
     ImportProfileFromOnboardingInput, ImportProfileFromRawInput, ListSessionLogsInput,
-    RecoverGroupKeyInput, RemoveProfileInput, RotateKeysetRequest, StartProfileSessionRequest,
+    RecoverGroupKeyInput, RemoveProfileInput, ResolveApprovalInput, RotateKeysetRequest,
+    StartProfileSessionRequest, UpdatePeerPolicyInput,
 };
 use crate::{app, session};
 
@@ -95,6 +96,9 @@ fn dispatch_profile_command(
                 | "start_profile_session"
                 | "profile_runtime_snapshot"
                 | "refresh_runtime_peers"
+                | "list_relay_profiles"
+                | "resolve_approval"
+                | "update_peer_policy"
                 | "stop_signer" => Err(anyhow::anyhow!(
                     "app handle required for test command '{}'",
                     command
@@ -225,6 +229,27 @@ fn dispatch_profile_command(
                     .map_err(Into::into),
             )
         }
+        "list_relay_profiles" => Some(
+            app::commands::list_relay_profiles(state.inner())
+                .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+        ),
+        "resolve_approval" => {
+            let input: ResolveApprovalInput = serde_json::from_value(input)?;
+            Some(
+                tauri::async_runtime::block_on(app::commands::resolve_approval(state.inner(), input))
+                    .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+            )
+        }
+        "update_peer_policy" => {
+            let input: UpdatePeerPolicyInput = serde_json::from_value(input)?;
+            Some(
+                tauri::async_runtime::block_on(app::commands::update_peer_policy(
+                    state.inner(),
+                    input,
+                ))
+                .and_then(|value| serde_json::to_value(value).map_err(Into::into)),
+            )
+        }
         _ => None,
     };
     result.transpose()
@@ -320,14 +345,17 @@ const EXPECTED_DISPATCH_COMMANDS: &[&str] = &[
     "import_profile_from_onboarding",
     "import_profile_from_raw",
     "list_profiles",
+    "list_relay_profiles",
     "list_session_logs",
     "navigate_view",
     "profile_runtime_snapshot",
     "recover_group_key",
     "refresh_runtime_peers",
     "remove_profile",
+    "resolve_approval",
     "start_profile_session",
     "stop_signer",
+    "update_peer_policy",
 ];
 
 #[cfg(test)]

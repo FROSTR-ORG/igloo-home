@@ -232,9 +232,10 @@ function deriveHomeReturningProfile(profile: ProfileManifest): WelcomeReturningP
     label: profile.label || 'My Desktop Key',
     // Home's ProfileManifest does not carry group_package_json / member_idx /
     // share_public_key at the manifest level — those live inside the encrypted
-    // profile artifact. Fall back to display-friendly placeholders.
-    thresholdLabel: '—',
-    memberLabel: '—',
+    // profile artifact. Pass empty strings so the meta row omits those fields
+    // rather than showing placeholder dashes.
+    thresholdLabel: '',
+    memberLabel: '',
     publicKeyLabel: formatWelcomeKey(profile.id),
     canRotate: true,
     canRecover: true,

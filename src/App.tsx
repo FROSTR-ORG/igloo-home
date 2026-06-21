@@ -1408,28 +1408,6 @@ export default function App() {
     await refreshRuntime(selectedProfileId);
   }
 
-  async function handleRemoveProfile(profileId: string) {
-    const profile = profiles.find((entry) => entry.id === profileId);
-    const shouldDelete = await confirm(
-      `Delete managed profile ${profile?.label ?? profileId} (${shortProfileId(profileId)})?`,
-      {
-      title: 'Delete Profile',
-      kind: 'warning',
-      },
-    );
-    if (!shouldDelete) {
-      return;
-    }
-    await run('removing managed profile', async () => {
-      if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id === profileId) {
-        await stopSigner();
-      }
-      await removeProfile(profileId);
-      await refreshProfiles(selectedProfileId === profileId ? null : selectedProfileId);
-      await refreshRuntime(null);
-    });
-  }
-
   async function handleCopyProfilePackage(format: 'bfprofile' | 'bfshare') {
     if (!selectedProfileId) {
       throw new Error('select a profile first');

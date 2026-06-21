@@ -39,6 +39,7 @@ import {
   WelcomeEntryHero,
   WelcomeReturningHero,
   WelcomeUnlockModal,
+  downloadText,
   type LogEntry,
   type OperatorSignerSettings,
   type SharedDistributionAction,
@@ -198,18 +199,6 @@ function splitTextarea(value: string) {
     .split(/\n+/)
     .map(line => line.trim())
     .filter(Boolean);
-}
-
-function downloadText(filename: string, text: string) {
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 }
 
 function unwrapImportedProfile(result: ProfileImportResult) {

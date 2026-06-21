@@ -143,4 +143,30 @@ describe('igloo-home recover-key view', () => {
       expect(screen.getByText(/Group public key:/)).toBeInTheDocument();
     });
   });
+
+  it('masks the recovered nsec and signing key until revealed', async () => {
+    apiMocks.recoverGroupKey.mockResolvedValue({
+      nsec: 'nsec1homerecoveredsecretvalue',
+      signing_key_hex: 'deadbeefcafe1234',
+      group_public_key: 'ff00 ',
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Recover Key' }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Group public key:/)).toBeInTheDocument();
+    });
+
+    // The nsec + signing key render through SensitiveTextarea (masked by default),
+    // so the secret material must not be in the DOM text until the operator reveals it.
+    expect(document.body.textContent).not.toContain('nsec1homerecoveredsecretvalue');
+    expect(document.body.textContent).not.toContain('deadbeefcafe1234');
+
+    // Revealing the nsec field exposes it.
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal Recovered nsec' }));
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('nsec1homerecoveredsecretvalue');
+    });
+  });
 });

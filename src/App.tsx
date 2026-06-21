@@ -1311,7 +1311,6 @@ export default function App() {
           ? 'Incorrect password. Please try again.'
           : message || 'Could not unlock this device.',
       );
-    } finally {
       setWelcomeUnlockSubmitting(false);
     }
   }
@@ -1525,7 +1524,7 @@ export default function App() {
             layout={profiles.length === 1 ? 'single' : profiles.length <= 3 ? 'multi' : 'many'}
             profiles={profiles.map(deriveHomeReturningProfile)}
             onUnlock={openWelcomeUnlock}
-            onRotate={(profileId) => { setSelectedProfileId(profileId); setActiveView('create'); }}
+            onRotate={(profileId) => { setSelectedProfileId(profileId); setCreateForm((prev) => ({ ...prev, mode: 'rotate', sourceProfileId: profileId })); setActiveView('create'); }}
             onRecover={(profileId) => { setRecoveredKey(null); setRecoverProfileId(profileId); setActiveView('recover-key'); }}
             onDelete={openWelcomeDelete}
             secondaryActions={[

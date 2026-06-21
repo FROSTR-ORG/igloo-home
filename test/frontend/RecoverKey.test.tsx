@@ -169,4 +169,26 @@ describe('igloo-home recover-key view', () => {
       expect(document.body.textContent).toContain('nsec1homerecoveredsecretvalue');
     });
   });
+
+  it('scrubs the recovered key when navigating away from the recover view', async () => {
+    apiMocks.recoverGroupKey.mockResolvedValue({
+      nsec: 'nsec1leavescrubsecretvalue',
+      signing_key_hex: 'cafebabe',
+      group_public_key: 'ff00 ',
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Recover Key' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Group public key:/)).toBeInTheDocument();
+    });
+
+    // Leaving the recover-key view clears recoveredKey, so the group nsec does not
+    // linger in app state (App.tsx scrub-on-leave effect).
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => {
+      expect(screen.queryByText(/Group public key:/)).not.toBeInTheDocument();
+    });
+    expect(document.body.textContent).not.toContain('nsec1leavescrubsecretvalue');
+  });
 });

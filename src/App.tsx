@@ -1134,18 +1134,32 @@ export default function App() {
   }
 
   async function handleFinalizeOnboardingProfile() {
+    // Surface validation failures in the error banner. These guards previously
+    // threw before `run()`, so the rejection was swallowed by the fire-and-forget
+    // `void handleFinalizeOnboardingProfile()` call site and the operator saw
+    // nothing.
     if (!pendingOnboardConnection) {
-      throw new Error('connect an onboarding package first');
+      setError('connect an onboarding package first');
+      return;
     }
     if (onboardSaveForm.passphrase !== onboardSaveForm.confirmPassphrase) {
-      throw new Error('passphrase confirmation does not match');
+      setError('passphrase confirmation does not match');
+      return;
     }
-    const result = await run('saving onboarded device', () =>
-      finalizeConnectedOnboarding({
-        label: onboardSaveForm.label || undefined,
-        passphrase: onboardSaveForm.passphrase,
-      }),
-    );
+    let result;
+    try {
+      result = await run('saving onboarded device', () =>
+        finalizeConnectedOnboarding({
+          label: onboardSaveForm.label || undefined,
+          passphrase: onboardSaveForm.passphrase,
+        }),
+      );
+    } catch {
+      // run() already surfaced the failure in the error banner; swallow the
+      // rejection so it doesn't leak out of the fire-and-forget `void` click
+      // handler as an unhandled rejection.
+      return;
+    }
     const profile = unwrapImportedProfile(result);
     setPassphrase(onboardSaveForm.passphrase);
     setPendingOnboardConnection(null);
@@ -1234,11 +1248,16 @@ export default function App() {
     sessionPassphrase = passphrase,
     nextView: ViewKey = 'dashboard',
   ) {
+    // Surface validation failures in the error banner rather than throwing into
+    // the fire-and-forget `void handleStartProfileSession()` call sites (where
+    // the rejection was swallowed and the operator saw nothing).
     if (!profileId) {
-      throw new Error('select a profile first');
+      setError('select a profile first');
+      return;
     }
     if (!sessionPassphrase.trim()) {
-      throw new Error('passphrase is required');
+      setError('passphrase is required');
+      return;
     }
     if (runtimeSnapshot?.active && runtimeSnapshot.profile?.id !== profileId) {
       await stopSigner();

@@ -292,3 +292,89 @@ describe('igloo-home landing shell', () => {
     });
   });
 });
+
+describe('igloo-home error banner (R6.4)', () => {
+  beforeEach(() => {
+    cleanup();
+    for (const mock of Object.values(apiMocks)) {
+      mock.mockReset();
+    }
+  });
+
+  const onboardConnection = {
+    preview: {
+      label: 'Onboarded Device',
+      share_public_key: '33'.repeat(32),
+      group_public_key: '22'.repeat(32),
+      relays: ['wss://relay.primal.net'],
+    },
+  };
+
+  it('surfaces a passphrase-confirmation mismatch in the banner and does not finalize', async () => {
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'onboard-save',
+      pendingOnboardConnection: onboardConnection,
+      onboardSaveForm: { label: 'Onboarded Device', passphrase: 'pass-a', confirmPassphrase: 'pass-b' },
+    };
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Device' }));
+
+    // The guard now routes through setError → the danger banner, instead of
+    // throwing into the fire-and-forget click handler where it was swallowed.
+    expect(await screen.findByText('passphrase confirmation does not match')).toBeInTheDocument();
+    expect(apiMocks.finalizeConnectedOnboarding).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an empty passphrase in the banner and does not start the signer', async () => {
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'dashboard',
+      activeDashboardTab: 'signer',
+      runtimeSnapshot: null,
+      passphrase: '',
+    };
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start Signer' }));
+
+    expect(await screen.findByText('passphrase is required')).toBeInTheDocument();
+    expect(apiMocks.startProfileSession).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a finalize decrypt failure (mapped HomeError message) in the banner', async () => {
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'onboard-save',
+      pendingOnboardConnection: onboardConnection,
+      onboardSaveForm: { label: 'Onboarded Device', passphrase: 'match', confirmPassphrase: 'match' },
+    };
+    // The real api maps HomeError invalid_passphrase to this message
+    // (api-decrypt.test.ts covers the mapping); assert it reaches the danger
+    // banner through run()/formatError.
+    apiMocks.finalizeConnectedOnboarding.mockRejectedValueOnce(new Error('Incorrect passphrase.'));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Device' }));
+
+    expect(await screen.findByText('Incorrect passphrase.')).toBeInTheDocument();
+  });
+
+  it('surfaces a finalize invalid-package failure in the banner', async () => {
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'onboard-save',
+      pendingOnboardConnection: onboardConnection,
+      onboardSaveForm: { label: 'Onboarded Device', passphrase: 'match', confirmPassphrase: 'match' },
+    };
+    apiMocks.finalizeConnectedOnboarding.mockRejectedValueOnce(
+      new Error('Invalid package: corrupted'),
+    );
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Device' }));
+
+    expect(await screen.findByText('Invalid package: corrupted')).toBeInTheDocument();
+  });
+});

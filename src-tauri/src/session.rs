@@ -494,18 +494,38 @@ mod recover_rotate_tests {
     }
 
     fn bfshare_source(share: &SharePackage, password: &str) -> RotationSourceInput {
+        bfshare_source_with(share, password, password)
+    }
+
+    /// Build a bfshare source whose ciphertext is encrypted with `encode_password`
+    /// but whose supplied `package_password` is `supplied_password` — so the two
+    /// can be made to mismatch to exercise the decode-failure path.
+    fn bfshare_source_with(
+        share: &SharePackage,
+        encode_password: &str,
+        supplied_password: &str,
+    ) -> RotationSourceInput {
         let package = encode_bfshare_package(
             &BfSharePayload {
                 share_secret: hex::encode(share.seckey.expose_bytes()),
                 relays: relays(),
             },
-            password,
+            encode_password,
         )
         .expect("encode bfshare");
         RotationSourceInput {
             package,
-            package_password: Passphrase::new(password.to_string()),
+            package_password: Passphrase::new(supplied_password.to_string()),
         }
+    }
+
+    /// Flip one character in the middle of a bech32 package body. The bech32
+    /// checksum makes any single-character change fail to decode.
+    fn corrupt_package(package: &str) -> String {
+        let mut chars: Vec<char> = package.chars().collect();
+        let mid = chars.len() / 2;
+        chars[mid] = if chars[mid] == 'q' { 'p' } else { 'q' };
+        chars.into_iter().collect()
     }
 
     #[test]
@@ -625,5 +645,77 @@ mod recover_rotate_tests {
             err.to_string().contains("does not match any member"),
             "unexpected error: {err}"
         );
+    }
+
+    // --- Adversarial decrypt / failure-path coverage (audit R6.4) ---
+
+    #[test]
+    fn resolve_runtime_rejects_wrong_device_passphrase() {
+        let paths = test_paths("unlock-wrong-pass");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        // The encrypted device share must not unlock under a passphrase other than
+        // the one it was imported with.
+        resolve_runtime_for_passphrase(
+            &paths,
+            &profile_id,
+            &Passphrase::new("not-the-passphrase".to_string()),
+        )
+        .expect_err("a wrong device passphrase must not unlock the share");
+        // Sanity: the correct passphrase still unlocks, so the rejection above is
+        // about the passphrase and not a broken fixture.
+        resolve_runtime_for_passphrase(&paths, &profile_id, &Passphrase::new(PASS.to_string()))
+            .expect("correct passphrase unlocks");
+    }
+
+    #[test]
+    fn recover_group_key_rejects_wrong_share_password() {
+        let paths = test_paths("recover-wrong-share-pw");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        // Source encrypted with one password but supplied with another — the
+        // bfshare decode must fail rather than yield garbage share material.
+        let sources = vec![bfshare_source_with(
+            &bundle.shares[1],
+            "correct-share-pw",
+            "wrong-share-pw",
+        )];
+        recover_group_key_from_shares(
+            &paths,
+            &profile_id,
+            Passphrase::new(PASS.into()),
+            sources,
+        )
+        .expect_err("a wrong share password must fail to decode the source");
+    }
+
+    #[test]
+    fn recover_group_key_rejects_corrupted_share_package() {
+        let paths = test_paths("recover-corrupt-share");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        let mut source = bfshare_source(&bundle.shares[1], "share-pw");
+        source.package = corrupt_package(&source.package);
+        recover_group_key_from_shares(
+            &paths,
+            &profile_id,
+            Passphrase::new(PASS.into()),
+            vec![source],
+        )
+        .expect_err("a corrupted share package must fail to decode");
+    }
+
+    #[test]
+    fn rotate_keyset_rejects_wrong_source_password() {
+        let paths = test_paths("rotate-wrong-source-pw");
+        let bundle = create_keyset(CreateKeysetConfig::new("Group", 2, 3)).expect("keyset");
+        let profile_id = import_profile(&paths, &bundle, 0);
+        // One good source, one whose supplied password does not match its ciphertext.
+        let sources = vec![
+            bfshare_source(&bundle.shares[0], "pw0"),
+            bfshare_source_with(&bundle.shares[1], "correct-pw1", "wrong-pw1"),
+        ];
+        make_rotated_keyset(&paths, 2, 3, &profile_id, sources)
+            .expect_err("a wrong source password must fail the rotation decode");
     }
 }

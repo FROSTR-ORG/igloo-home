@@ -5,6 +5,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 
 use crate::paths;
 use crate::session::AppState;
+use crate::util::LockExt;
 
 use super::window::show_main_window;
 
@@ -19,7 +20,7 @@ pub fn sync_tray(app: &tauri::AppHandle) -> Result<()> {
         return Ok(());
     }
     let state = app.state::<AppState>();
-    let signer = state.signer.lock().unwrap();
+    let signer = state.signer.lock_safe()?;
     let has_active = signer.active.is_some();
     drop(signer);
 

@@ -5,11 +5,12 @@ use crate::error::HomeError;
 use crate::events;
 use crate::models::{AppSettings, AppSettingsEvent, SettingsUpdateInput};
 use crate::session::AppState;
+use crate::util::LockExt;
 
 use super::tray::sync_tray;
 
 pub fn get_settings(state: &AppState) -> AppSettings {
-    state.settings.lock().unwrap().clone()
+    state.settings.lock_recover().clone()
 }
 
 pub fn update_settings(
@@ -23,7 +24,7 @@ pub fn update_settings(
     };
     crate::settings::save_settings(&state.paths, &settings)?;
     crate::settings::apply_launch_on_login(app, &settings)?;
-    *state.settings.lock().unwrap() = settings.clone();
+    *state.settings.lock_safe()? = settings.clone();
     let _ = app.emit(
         events::EVENT_APP_SETTINGS,
         AppSettingsEvent {

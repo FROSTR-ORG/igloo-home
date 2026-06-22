@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::models::{ConnectedOnboardingPreview, DiscardConnectedOnboardingResult};
 use crate::session::{AppState, PendingOnboardingState};
+use crate::util::LockExt;
 use anyhow::{Context, Result, bail};
 use bifrost_app::native_runtime;
 pub use bifrost_app::native_runtime::{ConnectedOnboardingImport, DaemonMetadata};
@@ -241,7 +242,7 @@ pub async fn connect_onboarding_package(
     let preview = ConnectedOnboardingPreview {
         preview: connected.preview.clone().into(),
     };
-    *state.pending_onboarding.lock().unwrap() = Some(PendingOnboardingState { connected });
+    *state.pending_onboarding.lock_safe()? = Some(PendingOnboardingState { connected });
     Ok(preview)
 }
 
@@ -254,8 +255,7 @@ pub fn finalize_connected_onboarding(
     state.shell_paths.ensure()?;
     let pending = state
         .pending_onboarding
-        .lock()
-        .unwrap()
+        .lock_safe()?
         .take()
         .ok_or_else(|| anyhow::anyhow!("connect an onboarding package first"))?;
     native_runtime::finalize_connected_onboarding_import(
@@ -268,7 +268,7 @@ pub fn finalize_connected_onboarding(
 }
 
 pub fn discard_connected_onboarding(state: &AppState) -> DiscardConnectedOnboardingResult {
-    let discarded = state.pending_onboarding.lock().unwrap().take().is_some();
+    let discarded = state.pending_onboarding.lock_recover().take().is_some();
     DiscardConnectedOnboardingResult { discarded }
 }
 

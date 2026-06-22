@@ -9,6 +9,7 @@ use crate::events;
 use crate::models::AppSettingsEvent;
 use crate::paths::AppPaths;
 use crate::session::{AppState, load_last_session, make_app_state, maybe_handle_close_request};
+use crate::util::LockExt;
 
 use super::tray::{handle_menu_event, sync_tray};
 
@@ -51,7 +52,7 @@ pub fn run() {
             let _ = app.handle().emit(
                 events::EVENT_APP_SETTINGS,
                 AppSettingsEvent {
-                    settings: app_state.settings.lock().unwrap().clone(),
+                    settings: app_state.settings.lock_recover().clone(),
                 },
             );
             sync_tray(app.handle())?;

@@ -20,6 +20,7 @@ use crate::models::{
 use crate::profiles;
 use crate::session::{self, AppState};
 use crate::session_log::read_session_log;
+use crate::util::LockExt;
 
 use super::tray::sync_tray;
 
@@ -230,7 +231,7 @@ pub async fn profile_runtime_snapshot(
 
 pub async fn refresh_runtime_peers(state: &AppState) -> Result<RuntimePeerRefreshResult> {
     let bridge = {
-        let guard = state.signer.lock().unwrap();
+        let guard = state.signer.lock_safe()?;
         guard
             .active
             .as_ref()
@@ -259,7 +260,7 @@ pub async fn refresh_runtime_peers(state: &AppState) -> Result<RuntimePeerRefres
 }
 
 fn active_bridge(state: &AppState) -> Result<std::sync::Arc<bifrost_bridge_tokio::Bridge>> {
-    let guard = state.signer.lock().unwrap();
+    let guard = state.signer.lock_safe()?;
     guard
         .active
         .as_ref()
@@ -371,7 +372,7 @@ fn resolve_session_log_runtime_dir(
     if let Some(value) = runtime_dir {
         return Ok(PathBuf::from(value));
     }
-    let guard = state.signer.lock().unwrap();
+    let guard = state.signer.lock_safe()?;
     guard
         .last_session
         .as_ref()

@@ -3,12 +3,13 @@ use tauri::{AppHandle, Emitter};
 
 use crate::events::EVENT_SIGNER_LIFECYCLE;
 use crate::models::SignerLifecycleEvent;
+use crate::util::LockExt;
 
 use super::AppState;
 
 pub fn emit_lifecycle(app: &AppHandle, state: &AppState, reason: &str) -> Result<()> {
     let (active, share_id, share_name, runtime_dir, last_session) = {
-        let guard = state.signer.lock().unwrap();
+        let guard = state.signer.lock_safe()?;
         let active = guard.active.as_ref();
         (
             active.is_some(),

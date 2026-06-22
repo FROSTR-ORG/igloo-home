@@ -19,6 +19,7 @@ use crate::profiles::{
     read_profile_daemon_metadata, resolve_runtime_for_passphrase,
 };
 use crate::session_log::{append_session_log, read_session_log};
+use crate::util::LockExt;
 
 use super::{
     ActiveSigner, AppState, emit_lifecycle, make_log, now_unix_secs, spawn_monitor, trim_logs,
@@ -30,7 +31,7 @@ pub async fn start_profile_session(
     state: &AppState,
     input: StartProfileSessionRequest,
 ) -> Result<ProfileRuntimeSnapshot> {
-    validate_start_preconditions(state.signer.lock().unwrap().active.is_some())?;
+    validate_start_preconditions(state.signer.lock_safe()?.active.is_some())?;
     let (profile, resolved) =
         resolve_runtime_for_start(&state.shell_paths, &input.profile_id, &input.passphrase)?;
     start_profile_session_resolved(app, state, profile, resolved).await
@@ -104,7 +105,7 @@ async fn start_profile_session_resolved(
     );
 
     {
-        let mut guard = state.signer.lock().unwrap();
+        let mut guard = state.signer.lock_safe()?;
         let entry = make_log(
             "info",
             format!("started profile session for '{}'", profile.label),
@@ -172,7 +173,7 @@ pub async fn stop_signer(app: &AppHandle, state: &AppState, reason: &str) -> Res
     write_json(state.paths.last_session_path.clone(), &session_resume)?;
 
     {
-        let mut guard = state.signer.lock().unwrap();
+        let mut guard = state.signer.lock_safe()?;
         guard.last_session = Some(session_resume.clone());
         let entry = make_log(
             "info",
@@ -191,7 +192,7 @@ pub async fn stop_signer(app: &AppHandle, state: &AppState, reason: &str) -> Res
 }
 
 fn take_active_signer(state: &AppState) -> Option<ActiveSigner> {
-    let mut guard = state.signer.lock().unwrap();
+    let mut guard = state.signer.lock_recover();
     guard.active.take()
 }
 
@@ -203,8 +204,7 @@ pub async fn profile_session_snapshot(
     let requested_profile = profile_id.or_else(|| {
         state
             .signer
-            .lock()
-            .unwrap()
+            .lock_recover()
             .last_session
             .as_ref()
             .map(|item| item.share_id.clone())
@@ -221,7 +221,7 @@ pub async fn profile_session_snapshot(
             .to_string()
     });
     let active = {
-        let guard = state.signer.lock().unwrap();
+        let guard = state.signer.lock_safe()?;
         guard
             .active
             .as_ref()
@@ -243,7 +243,7 @@ pub async fn profile_session_snapshot(
     };
 
     let bridge = {
-        let guard = state.signer.lock().unwrap();
+        let guard = state.signer.lock_safe()?;
         guard
             .active
             .as_ref()

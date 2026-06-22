@@ -3,6 +3,7 @@ use tauri::{Emitter, Manager};
 
 use crate::events::EVENT_APP_CLOSE_REQUESTED;
 use crate::models::CloseRequestEvent;
+use crate::util::LockExt;
 
 use super::AppState;
 
@@ -34,7 +35,7 @@ pub fn resolve_close_request(app: &tauri::AppHandle, action: &str) -> Result<()>
 pub fn maybe_handle_close_request(window: &tauri::Window, state: &AppState) -> Result<bool> {
     let behavior = determine_close_request_behavior(
         {
-            let mut close = state.close.lock().unwrap();
+            let mut close = state.close.lock_safe()?;
             if close.allow_close_once {
                 close.allow_close_once = false;
                 true
@@ -42,11 +43,10 @@ pub fn maybe_handle_close_request(window: &tauri::Window, state: &AppState) -> R
                 false
             }
         },
-        state.settings.lock().unwrap().close_to_tray,
+        state.settings.lock_safe()?.close_to_tray,
         state
             .signer
-            .lock()
-            .unwrap()
+            .lock_safe()?
             .active
             .as_ref()
             .map(|active| (active.share_id.clone(), active.share_name.clone())),

@@ -4,40 +4,22 @@ import { confirm } from '@tauri-apps/plugin-dialog';
 import { shortProfileId } from '@/lib/profileIdentity';
 import type {
   RuntimeOnboardingStatus,
-  RuntimePeerPermissionState,
   RuntimePeerStatus,
-  RuntimePendingOperation,
 } from 'igloo-shared';
-import { parseRuntimeStatus } from '@/lib/runtime-status';
+import {
+  extractPeerPermissionStates,
+  extractPendingApprovals,
+  extractPendingOperations,
+  extractRuntimePeers,
+  parseRuntimeStatus,
+} from '@/lib/runtime-status';
 import {
   Alert,
   AppHeader,
-  Button,
-  Checkbox,
-  ContentCard,
-  buildPeerReadinessRows,
-  buildPendingApprovalRows,
-  HostFlowShell,
-  DashboardConditionBanner,
-  DashboardLoadFailedScreen,
-  DashboardLoadingScreen,
   deriveDashboardState,
-  OperatorDashboardTabs,
-  OperatorPermissionsPanel,
-  OperatorSettingsPanel,
   OperatorSignerPanel,
   PageLayout,
-  type PeerReadinessRowModel,
-  type PendingApprovalRowModel,
-  ProfileConfirmationCard,
-  QrPayloadModal,
-  RecoverCollectSharesPanel,
-  SensitiveTextarea,
-  StepProgress,
-  Textarea,
   WelcomeDeleteModal,
-  WelcomeEntryHero,
-  WelcomeReturningHero,
   WelcomeUnlockModal,
   downloadText,
   type LogEntry,
@@ -51,8 +33,6 @@ import {
 import {
   buildPolicyDashboardView,
   buildSignerDashboardView,
-  type HomePeerPermissionState,
-  type HomePendingOperation,
 } from '@/lib/dashboard-view';
 import {
   applyRotationUpdate,
@@ -109,7 +89,13 @@ import type {
 } from '@/lib/types';
 import { installTestBridge } from '@/lib/testBridge';
 import { resolveVisualScenario } from '@/test/visualMode';
-import CreatePage from '@/pages/CreatePage';
+import CreateWorkspacePage from '@/pages/CreateWorkspacePage';
+import DashboardPage from '@/pages/DashboardPage';
+import LandingPage from '@/pages/LandingPage';
+import LoadProfilePage from '@/pages/LoadProfilePage';
+import OnboardConnectPage from '@/pages/OnboardConnectPage';
+import OnboardSavePage from '@/pages/OnboardSavePage';
+import RecoverKeyPage from '@/pages/RecoverKeyPage';
 
 type ViewKey =
   | 'landing'
@@ -356,119 +342,6 @@ function deriveDistributionResults(
   );
 }
 
-function extractPeerPermissionStates(runtimeSnapshot: ProfileRuntimeSnapshot | null): HomePeerPermissionState[] {
-  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
-  const fromRuntime = runtimeStatus?.peer_permission_states;
-  if (!Array.isArray(fromRuntime)) return [];
-  return fromRuntime
-    .map((policy: RuntimePeerPermissionState): HomePeerPermissionState | null => {
-      if (typeof policy !== 'object' || policy === null) return null;
-      if (typeof policy.pubkey !== 'string') return null;
-      const manualOverride = policy.manual_override;
-      const remoteObservation = policy.remote_observation;
-      const effectivePolicy = policy.effective_policy;
-      return {
-        pubkey: policy.pubkey,
-        manualOverride: {
-          request: {
-            ping: manualOverride?.request?.ping ?? 'unset',
-            onboard: manualOverride?.request?.onboard ?? 'unset',
-            sign: manualOverride?.request?.sign ?? 'unset',
-            ecdh: manualOverride?.request?.ecdh ?? 'unset',
-          },
-          respond: {
-            ping: manualOverride?.respond?.ping ?? 'unset',
-            onboard: manualOverride?.respond?.onboard ?? 'unset',
-            sign: manualOverride?.respond?.sign ?? 'unset',
-            ecdh: manualOverride?.respond?.ecdh ?? 'unset',
-          },
-        },
-        remoteObservation:
-          remoteObservation && typeof remoteObservation === 'object'
-            ? {
-                request: {
-                  ping: Boolean(remoteObservation.request?.ping),
-                  onboard: Boolean(remoteObservation.request?.onboard),
-                  sign: Boolean(remoteObservation.request?.sign),
-                  ecdh: Boolean(remoteObservation.request?.ecdh),
-                },
-                respond: {
-                  ping: Boolean(remoteObservation.respond?.ping),
-                  onboard: Boolean(remoteObservation.respond?.onboard),
-                  sign: Boolean(remoteObservation.respond?.sign),
-                  ecdh: Boolean(remoteObservation.respond?.ecdh),
-                },
-                updated: Number(remoteObservation.updated ?? 0),
-                revision: Number(remoteObservation.revision ?? 0),
-              }
-            : null,
-        effectivePolicy: {
-          request: {
-            ping: Boolean(effectivePolicy?.request?.ping),
-            onboard: Boolean(effectivePolicy?.request?.onboard),
-            sign: Boolean(effectivePolicy?.request?.sign),
-            ecdh: Boolean(effectivePolicy?.request?.ecdh),
-          },
-          respond: {
-            ping: Boolean(effectivePolicy?.respond?.ping),
-            onboard: Boolean(effectivePolicy?.respond?.onboard),
-            sign: Boolean(effectivePolicy?.respond?.sign),
-            ecdh: Boolean(effectivePolicy?.respond?.ecdh),
-          },
-        },
-      };
-    })
-    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-}
-
-function extractRuntimePeers(runtimeSnapshot: ProfileRuntimeSnapshot | null): PeerReadinessRowModel[] {
-  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
-  const peers: RuntimePeerStatus[] = Array.isArray(runtimeStatus?.peers) ? runtimeStatus.peers : [];
-  const rosterPubkeys: string[] = Array.isArray(runtimeStatus?.metadata?.peers)
-    ? runtimeStatus.metadata.peers
-    : [];
-  return buildPeerReadinessRows({
-    peers,
-    rosterPubkeys,
-    policyPubkeys: extractPeerPermissionStates(runtimeSnapshot).map((entry) => entry.pubkey),
-  });
-}
-
-function extractPendingOperations(runtimeSnapshot: ProfileRuntimeSnapshot | null): HomePendingOperation[] {
-  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
-  const fromRuntime = runtimeStatus?.pending_operations;
-  if (!Array.isArray(fromRuntime)) return [];
-  return fromRuntime
-    .map((operation: RuntimePendingOperation): HomePendingOperation | null => {
-      if (!operation || typeof operation !== 'object') return null;
-      if (typeof operation.request_id !== 'string' || typeof operation.op_type !== 'string') return null;
-      return {
-        request_id: operation.request_id,
-        op_type: operation.op_type,
-        threshold: typeof operation.threshold === 'number' ? operation.threshold : 0,
-        started_at: typeof operation.started_at === 'number' ? operation.started_at : null,
-        timeout_at: typeof operation.timeout_at === 'number' ? operation.timeout_at : null,
-        collected_responses: Array.isArray(operation.collected_responses) ? operation.collected_responses.length : 0,
-        target_peers: Array.isArray(operation.target_peers)
-          ? operation.target_peers.filter((peer): peer is string => typeof peer === 'string')
-          : [],
-      };
-    })
-    .filter((entry): entry is HomePendingOperation => entry !== null);
-}
-
-function extractPendingApprovals(
-  runtimeSnapshot: ProfileRuntimeSnapshot | null,
-  peers: PeerReadinessRowModel[],
-): PendingApprovalRowModel[] {
-  const runtimeStatus = parseRuntimeStatus(runtimeSnapshot?.runtime_status ?? null);
-  const approvals = Array.isArray(runtimeStatus?.pending_approvals) ? runtimeStatus.pending_approvals : [];
-  return buildPendingApprovalRows({
-    approvals,
-    peerAliases: Object.fromEntries(peers.map((row) => [row.pubkey, row.alias])),
-  });
-}
-
 function toLogEntries(lines: string[] = []): LogEntry[] {
   return lines.map((line, index) => ({
     id: `home-log-${index}-${line}`,
@@ -477,33 +350,6 @@ function toLogEntries(lines: string[] = []): LogEntry[] {
     message: line.replace(/^\[[^\]]+\]\s*/, ''),
     data: { raw: line },
   }));
-}
-
-function DesktopSettingsExtras({
-  settings,
-  onToggle,
-}: {
-  settings: AppSettings;
-  onToggle: (field: keyof AppSettings, checked: boolean) => void;
-}) {
-  return (
-    <ContentCard title="Desktop Lifecycle Settings" description="Tray handling, launch behavior, and session restoration.">
-      <div className="igloo-settings-grid">
-        <Checkbox
-          checked={settings.close_to_tray}
-          onCheckedChange={(checked) => onToggle('close_to_tray', checked)}
-          label="Close to tray"
-          description="Hide the window instead of prompting to stop the active signer session."
-        />
-        <Checkbox
-          checked={settings.launch_on_login}
-          onCheckedChange={(checked) => onToggle('launch_on_login', checked)}
-          label="Launch on login"
-          description="Register the desktop app at system startup without unlocking a profile automatically."
-        />
-      </div>
-    </ContentCard>
-  );
 }
 
 export default function App() {
@@ -1508,612 +1354,244 @@ export default function App() {
       {notice ? <div className="igloo-message-muted">{notice}</div> : null}
 
       {activeView === 'landing' ? (
-        profiles.length === 0 ? (
-          <WelcomeEntryHero
-            logoSrc={iglooLogoSrc}
-            productLabel="Igloo Home"
-            tagline="Threshold signing for your desktop."
-            primaryAction={{
-              heading: 'Create / Rotate Keyset',
-              description: 'Generate new share material or rotate an existing keyset, save one local desktop device, and distribute the remaining shares.',
-              buttonLabel: 'Start',
-              onAction: () => setActiveView('create'),
-            }}
-            secondaryActions={[
-              { id: 'load', label: 'Load Profile', onAction: () => setActiveView('load') },
-              { id: 'onboard', label: 'Onboard Device', onAction: () => setActiveView('onboard-connect') },
-            ]}
-          />
-        ) : (
-          <WelcomeReturningHero
-            logoSrc={iglooLogoSrc}
-            productLabel="Igloo Home"
-            layout={profiles.length === 1 ? 'single' : profiles.length <= 3 ? 'multi' : 'many'}
-            profiles={profiles.map(deriveHomeReturningProfile)}
-            onUnlock={openWelcomeUnlock}
-            onRotate={(profileId) => { setSelectedProfileId(profileId); setCreateForm((prev) => ({ ...prev, mode: 'rotate', sourceProfileId: profileId })); setActiveView('create'); }}
-            onRecover={(profileId) => { setRecoveredKey(null); setRecoverProfileId(profileId); setActiveView('recover-key'); }}
-            onDelete={openWelcomeDelete}
-            secondaryActions={[
-              { id: 'load', label: 'Load Profile', onAction: () => setActiveView('load') },
-              { id: 'onboard', label: 'Onboard Device', onAction: () => setActiveView('onboard-connect') },
-            ]}
-          />
-        )
+        <LandingPage
+          logoSrc={iglooLogoSrc}
+          profiles={profiles.map(deriveHomeReturningProfile)}
+          onCreate={() => setActiveView('create')}
+          onLoad={() => setActiveView('load')}
+          onOnboard={() => setActiveView('onboard-connect')}
+          onUnlock={openWelcomeUnlock}
+          onRotate={(profileId) => {
+            setSelectedProfileId(profileId);
+            setCreateForm((prev) => ({ ...prev, mode: 'rotate', sourceProfileId: profileId }));
+            setActiveView('create');
+          }}
+          onRecover={(profileId) => {
+            setRecoveredKey(null);
+            setRecoverProfileId(profileId);
+            setActiveView('recover-key');
+          }}
+          onDelete={openWelcomeDelete}
+        />
       ) : null}
 
       {activeView === 'create' ? (
-        <HostFlowShell
-          title="Create / Rotate Keyset"
-          description="Step through the same host workflow as the PWA, then save one managed desktop profile into the encrypted profile store."
+        <CreateWorkspacePage
+          createForm={createForm}
+          availableProfiles={profiles.map((profile) => ({ id: profile.id, label: profile.label }))}
+          rotationSources={rotationSources}
+          generatedKeyset={generatedKeyset}
+          saveForms={saveForms}
+          selectedMemberIdx={selectedGeneratedShareIdx}
+          distributionForms={distributionForms}
+          distributionResults={deriveDistributionResults(
+            distributionResults,
+            generatedKeyset?.shares ?? [],
+            runtimeSnapshot,
+          )}
+          distributionQr={distributionQr}
+          onChangeCreateForm={(field, value) => setCreateForm(current => ({ ...current, [field]: value }))}
+          onChangeRotationSource={(index, field, value) =>
+            setRotationSources((current) =>
+              current.map((source, sourceIndex) =>
+                sourceIndex === index ? { ...source, [field]: value } : source,
+              ),
+            )
+          }
+          onAddRotationSource={() =>
+            setRotationSources((current) => [...current, { packageText: '', packagePassword: '' }])
+          }
+          onRemoveRotationSource={(index) =>
+            setRotationSources((current) => current.filter((_, sourceIndex) => sourceIndex !== index))
+          }
+          onGenerateFresh={() => void handleGenerate()}
+          onChangeSaveForm={(memberIdx, field, value) =>
+            setSaveForms(current => ({
+              ...current,
+              [memberIdx]: {
+                ...current[memberIdx],
+                [field]: value,
+              },
+            }))
+          }
+          onSaveGeneratedProfile={share => void handleSaveGeneratedProfile(share)}
+          onChangeDistributionForm={(memberIdx, field, value) =>
+            setDistributionForms((current) => ({
+              ...current,
+              [memberIdx]: {
+                ...(current[memberIdx] ?? { label: '', packagePassword: '', confirmPassword: '' }),
+                [field]: value,
+              },
+            }))
+          }
+          onDistributeShare={(memberIdx, kind) => void handleDistributeGeneratedShare(memberIdx, kind)}
+          onFinishDistribution={handleFinishDistribution}
+          onCloseDistributionQr={() => setDistributionQr(null)}
           onBack={() => setActiveView('landing')}
-          backTooltip="Back"
-        >
-          <div className="igloo-stack">
-            <StepProgress steps={['Generate', 'Create profile', 'Review', 'Distribute']} active={generatedKeyset ? 1 : 0} />
-            <section className="igloo-task-banner">
-              <span className="igloo-task-kicker">Create or Rotate</span>
-              <p>Provide the group name and threshold geometry, then create or rebuild the keyset before saving one local desktop device.</p>
-              <div className="igloo-task-points">
-                <span>The group name identifies the shared group and the shares issued from it.</span>
-                <span>Rotation preserves the same group public key and issues fresh device shares.</span>
-              </div>
-            </section>
-          </div>
-          <CreatePage
-            createForm={createForm}
-            availableProfiles={profiles.map((profile) => ({ id: profile.id, label: profile.label }))}
-            rotationSources={rotationSources}
-            generatedKeyset={generatedKeyset}
-            saveForms={saveForms}
-            selectedMemberIdx={selectedGeneratedShareIdx}
-            distributionForms={distributionForms}
-            distributionResults={deriveDistributionResults(
-              distributionResults,
-              generatedKeyset?.shares ?? [],
-              runtimeSnapshot,
-            )}
-            onChangeCreateForm={(field, value) => setCreateForm(current => ({ ...current, [field]: value }))}
-            onChangeRotationSource={(index, field, value) =>
-              setRotationSources((current) =>
-                current.map((source, sourceIndex) =>
-                  sourceIndex === index ? { ...source, [field]: value } : source,
-                ),
-              )
-            }
-            onAddRotationSource={() =>
-              setRotationSources((current) => [...current, { packageText: '', packagePassword: '' }])
-            }
-            onRemoveRotationSource={(index) =>
-              setRotationSources((current) => current.filter((_, sourceIndex) => sourceIndex !== index))
-            }
-            onGenerateFresh={() => void handleGenerate()}
-            onChangeSaveForm={(memberIdx, field, value) =>
-              setSaveForms(current => ({
-                ...current,
-                [memberIdx]: {
-                  ...current[memberIdx],
-                  [field]: value,
-                },
-              }))
-            }
-            onSaveGeneratedProfile={share => void handleSaveGeneratedProfile(share)}
-            onChangeDistributionForm={(memberIdx, field, value) =>
-              setDistributionForms((current) => ({
-                ...current,
-                [memberIdx]: {
-                  ...(current[memberIdx] ?? { label: '', packagePassword: '', confirmPassword: '' }),
-                  [field]: value,
-                },
-              }))
-            }
-            onDistributeShare={(memberIdx, kind) => void handleDistributeGeneratedShare(memberIdx, kind)}
-            onFinishDistribution={handleFinishDistribution}
-            distributionBeforeCards={selectedProfile ? (
-              <>
-                {!runtimeSnapshot?.active ? (
-                  <Alert tone="default">Live onboarding tracking is paused until the host signer is running.</Alert>
-                ) : null}
-                <OperatorSignerPanel
-                  view={buildSignerDashboardView({
-                    profileName: selectedProfile.label,
-                    groupPublicKey: runtimeMetadata?.group_public_key,
-                    sharePublicKey: runtimeMetadata?.share_public_key,
-                    memberIdx: runtimeMetadata?.member_idx,
-                    running: Boolean(runtimeSnapshot?.active),
-                    peers: runtimePeers,
-                    pendingApprovals,
-                    pendingOperations,
-                    logLines: runtimeSnapshot?.daemon_log_lines,
-                  })}
-                  onApproveOnce={(id) => void handleResolveApproval(id, true)}
-                  onDenyApproval={(id) => void handleResolveApproval(id, false)}
-                  onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
-                  runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-                  onPrimaryAction={() =>
-                    void (runtimeSnapshot?.active
-                      ? handleStopProfileSession()
-                      : handleStartProfileSession(
-                          selectedProfile.id,
-                          passphrase,
-                          'create',
-                        ))
-                  }
-                  primaryActionVariant={runtimeSnapshot?.active ? 'destructive' : 'success'}
-                  onRefreshPeers={() => void handleRefreshRuntimePeers()}
-                  refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
-                />
-              </>
-            ) : null}
-          />
-          <QrPayloadModal
-            open={Boolean(distributionQr)}
-            onClose={() => setDistributionQr(null)}
-            title="Onboarding Package QR"
-            label={distributionQr?.label}
-            payload={distributionQr?.packageText ?? ''}
-          />
-        </HostFlowShell>
+          distributionBeforeCards={selectedProfile ? (
+            <>
+              {!runtimeSnapshot?.active ? (
+                <Alert tone="default">Live onboarding tracking is paused until the host signer is running.</Alert>
+              ) : null}
+              <OperatorSignerPanel
+                view={buildSignerDashboardView({
+                  profileName: selectedProfile.label,
+                  groupPublicKey: runtimeMetadata?.group_public_key,
+                  sharePublicKey: runtimeMetadata?.share_public_key,
+                  memberIdx: runtimeMetadata?.member_idx,
+                  running: Boolean(runtimeSnapshot?.active),
+                  peers: runtimePeers,
+                  pendingApprovals,
+                  pendingOperations,
+                  logLines: runtimeSnapshot?.daemon_log_lines,
+                })}
+                onApproveOnce={(id) => void handleResolveApproval(id, true)}
+                onDenyApproval={(id) => void handleResolveApproval(id, false)}
+                onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
+                runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
+                onPrimaryAction={() =>
+                  void (runtimeSnapshot?.active
+                    ? handleStopProfileSession()
+                    : handleStartProfileSession(
+                        selectedProfile.id,
+                        passphrase,
+                        'create',
+                      ))
+                }
+                primaryActionVariant={runtimeSnapshot?.active ? 'destructive' : 'success'}
+                onRefreshPeers={() => void handleRefreshRuntimePeers()}
+                refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
+              />
+            </>
+          ) : null}
+        />
       ) : null}
 
       {activeView === 'load' ? (
-        <HostFlowShell
-          title="Load Profile"
-          description="Import a full device profile from its self-contained `bfprofile` package."
+        <LoadProfilePage
+          loadForm={loadForm}
+          onChange={(field, value) => setLoadForm(current => ({ ...current, [field]: value }))}
+          onImport={() => void handleLoadPackage()}
           onBack={() => setActiveView('landing')}
-          backTooltip="Back"
-        >
-          <div className="igloo-flow-root igloo-stack">
-            <StepProgress steps={['Import bfprofile', 'Load device']} active={0} />
-            <section className="igloo-task-banner">
-              <span className="igloo-task-kicker">Load a desktop device</span>
-              <p>Import a protected `bfprofile`, then save the resulting desktop profile into the local encrypted profile store. To rebuild a lost device you need its `bfprofile` — a bare `bfshare` no longer carries the group package.</p>
-            </section>
-            <label>
-              Profile label
-              <input
-                value={loadForm.label}
-                onChange={event => setLoadForm(current => ({ ...current, label: event.target.value }))}
-                placeholder="Optional desktop label"
-              />
-            </label>
-            <label>
-              Passphrase
-              <input
-                type="password"
-                value={loadForm.passphrase}
-                onChange={event => setLoadForm(current => ({ ...current, passphrase: event.target.value }))}
-                placeholder="Used for local managed storage"
-              />
-            </label>
-            <label>
-              Package password
-              <input
-                type="password"
-                value={loadForm.packagePassword}
-                onChange={event => setLoadForm(current => ({ ...current, packagePassword: event.target.value }))}
-              />
-            </label>
-            <label>
-              bfprofile
-              <Textarea
-                className="min-h-[140px]"
-                value={loadForm.packageText}
-                onChange={event => setLoadForm(current => ({ ...current, packageText: event.target.value }))}
-                placeholder="Paste bfprofile1..."
-              />
-            </label>
-            <div className="igloo-button-row">
-              <Button type="button" size="sm" onClick={() => void handleLoadPackage()}>
-                Import Profile
-              </Button>
-            </div>
-          </div>
-        </HostFlowShell>
+        />
       ) : null}
 
       {activeView === 'recover-key' ? (
-        <HostFlowShell
-          title="Recover Group Key"
-          description="Reconstruct the group secret key (nsec) locally from a threshold of shares. Nothing is published to a relay."
+        <RecoverKeyPage
+          profiles={profiles}
+          recoverProfileId={recoverProfileId}
+          recoverDevicePassphrase={recoverDevicePassphrase}
+          recoverSources={recoverSources}
+          recoverThreshold={recoverThreshold}
+          recoveredKey={recoveredKey}
+          onChangeProfileId={setRecoverProfileId}
+          onChangeDevicePassphrase={setRecoverDevicePassphrase}
+          onChangeSource={updateRecoverSource}
+          onAddSource={() => setRecoverSources(current => [...current, { packageText: '', packagePassword: '' }])}
+          onRemoveSource={index => setRecoverSources(current => current.filter((_, sourceIndex) => sourceIndex !== index))}
+          onRecover={() => void handleRecoverGroupKey()}
           onBack={() => setActiveView('landing')}
-          backTooltip="Back"
-        >
-          <div className="igloo-flow-root igloo-stack">
-            <StepProgress steps={['Collect shares', 'Recovered key']} active={recoveredKey ? 1 : 0} />
-            <section className="igloo-task-banner">
-              <span className="igloo-task-kicker">Local key recovery</span>
-              <p>Pick a local profile to supply the group package and this device's own share, then paste the other members' `bfshare`s to meet the threshold.</p>
-            </section>
-            <label>
-              Recovering profile
-              <select
-                value={recoverProfileId}
-                onChange={event => setRecoverProfileId(event.target.value)}
-              >
-                <option value="">Select a local profile…</option>
-                {profiles.map(profile => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.label} ({shortProfileId(profile.id)})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <RecoverCollectSharesPanel
-              devicePassphrase={recoverDevicePassphrase}
-              onChangeDevicePassphrase={setRecoverDevicePassphrase}
-              sources={recoverSources}
-              threshold={recoverThreshold ?? 1 + recoverSources.filter(source => source.packageText.trim().length > 0).length}
-              collectedCount={1 + recoverSources.filter(source => source.packageText.trim().length > 0).length}
-              onChangeSource={updateRecoverSource}
-              onAddSource={() => setRecoverSources(current => [...current, { packageText: '', packagePassword: '' }])}
-              onRemoveSource={index => setRecoverSources(current => current.filter((_, sourceIndex) => sourceIndex !== index))}
-              onNext={() => void handleRecoverGroupKey()}
-              actionLabel="Recover Key"
-            />
-            {recoveredKey ? (
-              <div className="igloo-stack">
-                <SensitiveTextarea label="Recovered nsec" value={recoveredKey.nsec} placeholderLines={3} rows={3} />
-                <SensitiveTextarea
-                  label="Signing key hex"
-                  value={recoveredKey.signing_key_hex}
-                  placeholderLines={3}
-                  rows={3}
-                />
-                <p className="igloo-recover-helper">Group public key: {recoveredKey.group_public_key}</p>
-                <section className="igloo-task-banner">
-                  <span className="igloo-task-kicker">Handle the key with care</span>
-                  <p>
-                    This group secret key was reconstructed on this device and is shown
-                    here in plaintext — displaying it means it left the secure core and
-                    crossed into the app window, so treat it as exposed to this machine.
-                    Move it into an encrypted store now, then leave this screen to clear
-                    it from the app. Nothing is written to disk for you.
-                  </p>
-                </section>
-              </div>
-            ) : null}
-          </div>
-        </HostFlowShell>
+        />
       ) : null}
 
       {activeView === 'onboard-connect' ? (
-        <HostFlowShell
-          title="Onboard Device"
-          description="Connect with a protected onboarding package, resolve the handshake, then review the device before saving it locally."
+        <OnboardConnectPage
+          form={onboardConnectForm}
+          onChange={(field, value) => setOnboardConnectForm(current => ({ ...current, [field]: value }))}
+          onConnect={() => void handleConnectOnboardingPackage()}
           onBack={() => setActiveView('landing')}
-          backTooltip="Back"
-        >
-          <div className="igloo-flow-root igloo-stack">
-            <StepProgress steps={['Connect with package', 'Save device']} active={0} />
-            <section className="igloo-task-banner">
-              <span className="igloo-task-kicker">Desktop onboarding</span>
-              <p>The desktop host resolves the onboarding handshake first, then shows the same review-and-save step that the PWA uses before creating the managed profile.</p>
-            </section>
-            <label>
-              Package password
-              <input
-                type="password"
-                value={onboardConnectForm.password}
-                onChange={event => setOnboardConnectForm(current => ({ ...current, password: event.target.value }))}
-              />
-            </label>
-            <label>
-              bfonboard
-              <Textarea
-                className="min-h-[160px]"
-                value={onboardConnectForm.packageText}
-                onChange={event => setOnboardConnectForm(current => ({ ...current, packageText: event.target.value }))}
-                placeholder="Paste bfonboard1..."
-              />
-            </label>
-            <div className="igloo-button-row">
-              <Button type="button" size="sm" onClick={() => void handleConnectOnboardingPackage()}>
-                Connect
-              </Button>
-            </div>
-          </div>
-        </HostFlowShell>
+        />
       ) : null}
 
       {activeView === 'onboard-save' && pendingOnboardConnection ? (
-        <HostFlowShell
-          title="Save Onboarded Device"
-          description="Review the resolved profile details and choose the passphrase used to store this desktop device locally."
-          onBack={() => void handleDiscardOnboardingConnection('onboard-connect')}
-          backTooltip="Back to connect"
-        >
-          <div className="igloo-flow-root igloo-stack">
-            <StepProgress steps={['Connect with package', 'Save device']} active={1} />
-            <ProfileConfirmationCard
-              title="Review Onboarded Profile"
-              profileName={pendingOnboardConnection.preview.label}
-              sharePublicKey={pendingOnboardConnection.preview.share_public_key}
-              groupPublicKey={pendingOnboardConnection.preview.group_public_key}
-              relays={pendingOnboardConnection.preview.relays}
-            />
-            <section className="igloo-task-banner">
-              <span className="igloo-task-kicker">Handshake complete</span>
-              <p>The onboarding package has been resolved. Confirm the device label and passphrase before saving this managed desktop profile.</p>
-            </section>
-            <label>
-              Device label
-              <input
-                value={onboardSaveForm.label}
-                onChange={event => setOnboardSaveForm(current => ({ ...current, label: event.target.value }))}
-              />
-            </label>
-            <label>
-              Passphrase
-              <input
-                type="password"
-                value={onboardSaveForm.passphrase}
-                onChange={event =>
-                  setOnboardSaveForm(current => ({ ...current, passphrase: event.target.value }))
-                }
-              />
-            </label>
-            <label>
-              Confirm passphrase
-              <input
-                type="password"
-                value={onboardSaveForm.confirmPassphrase}
-                onChange={event =>
-                  setOnboardSaveForm(current => ({ ...current, confirmPassphrase: event.target.value }))
-                }
-              />
-            </label>
-            <div className="igloo-button-row">
-              <Button type="button" size="sm" variant="secondary" onClick={() => void handleDiscardOnboardingConnection('onboard-connect')}>
-                Cancel
-              </Button>
-              <Button type="button" size="sm" onClick={() => void handleFinalizeOnboardingProfile()}>
-                Save Device
-              </Button>
-            </div>
-          </div>
-        </HostFlowShell>
+        <OnboardSavePage
+          connection={pendingOnboardConnection}
+          form={onboardSaveForm}
+          onChange={(field, value) => setOnboardSaveForm(current => ({ ...current, [field]: value }))}
+          onCancel={() => void handleDiscardOnboardingConnection('onboard-connect')}
+          onSave={() => void handleFinalizeOnboardingProfile()}
+        />
       ) : null}
 
       {activeView === 'dashboard' ? (
-        <HostFlowShell
-          title={
-            selectedProfile
-              ? `Device Dashboard · ${selectedProfile.label} (${shortProfileId(selectedProfile.id)})`
-              : 'Device Dashboard'
-          }
-          description="Desktop operator console for the selected managed signer profile."
+        <DashboardPage
+          selectedProfile={selectedProfile}
+          selectedProfileId={selectedProfileId}
+          selectedRelayProfile={selectedRelayProfile}
+          activeDashboardTab={activeDashboardTab}
+          runtimeActive={Boolean(runtimeSnapshot?.active)}
+          runtimeMetadata={runtimeMetadata}
+          runtimeLogLines={runtimeSnapshot?.daemon_log_lines}
+          dashboardState={dashboardState}
+          runtimePeers={runtimePeers}
+          peerPermissionStates={peerPermissionStates}
+          pendingApprovals={pendingApprovals}
+          pendingOperations={pendingOperations}
+          peerRefreshSummary={peerRefreshSummary}
+          settings={settings}
+          settingsDraft={settingsDraft}
+          relayDraft={relayDraft}
+          packageDraft={packageDraft}
+          rotationForm={rotationForm}
           onBack={() => setActiveView('landing')}
-          backTooltip="Back to landing"
-        >
-          <section className="igloo-flow-root igloo-stack">
-            <OperatorDashboardTabs
-              tabs={[
-                { key: 'signer', label: 'Signer', description: 'runtime console' },
-                { key: 'permissions', label: 'Permissions', description: 'peer policies' },
-                { key: 'settings', label: 'Settings', description: 'operator controls' },
-              ]}
-              activeTab={activeDashboardTab}
-              onChangeTab={value => setActiveDashboardTab(value as DashboardTab)}
-            />
-
-          {activeDashboardTab === 'signer' ? (
-            dashboardState.kind === 'loading' ? (
-              <DashboardLoadingScreen detail={dashboardState.detail} />
-            ) : dashboardState.kind === 'load-failed' ? (
-              <DashboardLoadFailedScreen
-                message={dashboardState.message}
-                timestampLabel={
-                  dashboardState.at ? new Date(dashboardState.at * 1000).toLocaleString() : undefined
-                }
-                onRetry={() => void handleStartProfileSession()}
-              />
-            ) : (
-            <>
-              {dashboardState.banners.map((banner) => (
-                <DashboardConditionBanner
-                  key={banner.kind}
-                  banner={banner}
-                  timestampLabel={
-                    banner.kind === 'signing-failed'
-                      ? new Date(banner.at * 1000).toLocaleString()
-                      : undefined
-                  }
-                  onDismiss={
-                    banner.kind === 'signing-failed'
-                      ? () => setDismissedSignFailureId(banner.requestId)
-                      : undefined
-                  }
-                />
-              ))}
-            <OperatorSignerPanel
-              view={buildSignerDashboardView({
-                profileName: selectedProfile?.label ?? null,
-                groupPublicKey: runtimeMetadata?.group_public_key,
-                sharePublicKey: runtimeMetadata?.share_public_key,
-                memberIdx: runtimeMetadata?.member_idx,
-                running: Boolean(runtimeSnapshot?.active),
-                peers: runtimePeers,
-                pendingApprovals,
-                pendingOperations,
-                logLines: runtimeSnapshot?.daemon_log_lines,
-              })}
-              onApproveOnce={(id) => void handleResolveApproval(id, true)}
-              onDenyApproval={(id) => void handleResolveApproval(id, false)}
-              onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
-              runtimeControlLabel={runtimeSnapshot?.active ? 'Stop Signer' : 'Start Signer'}
-              statusBanner={
-                peerRefreshSummary ? (
-                  <div
-                    className={`rounded-lg border px-3 py-2 text-sm ${
-                      peerRefreshSummary.tone === 'success'
-                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                        : peerRefreshSummary.tone === 'warning'
-                          ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                          : 'border-red-500/30 bg-red-500/10 text-red-200'
-                    }`}
-                  >
-                    <div>{peerRefreshSummary.message}</div>
-                    {peerRefreshSummary.details.length > 0 ? (
-                      <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
-                        {peerRefreshSummary.details.map((detail) => (
-                          <li key={detail} className="break-all">
-                            {detail}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ) : null
-              }
-              onPrimaryAction={() =>
-                void (runtimeSnapshot?.active ? handleStopProfileSession() : handleStartProfileSession())
-              }
-              primaryActionVariant={runtimeSnapshot?.active ? 'destructive' : 'success'}
-              onRefreshPeers={() => void handleRefreshRuntimePeers()}
-              refreshPeersDisabled={!selectedProfileId || !runtimeSnapshot?.active}
-            />
-            </>
+          onChangeTab={setActiveDashboardTab}
+          onDismissSignFailure={setDismissedSignFailureId}
+          onRetryLoad={() => void handleStartProfileSession()}
+          onApproveOnce={(id) => void handleResolveApproval(id, true)}
+          onDenyApproval={(id) => void handleResolveApproval(id, false)}
+          onAlwaysAllow={(id) => void handleAlwaysAllowApproval(id)}
+          onRuntimePrimaryAction={() =>
+            void (runtimeSnapshot?.active ? handleStopProfileSession() : handleStartProfileSession())
+          }
+          onRefreshPeers={() => void handleRefreshRuntimePeers()}
+          onRefreshPermissions={() => void refreshRuntime(selectedProfileId || null)}
+          onPeerPolicyChange={(pubkey, direction, method, value) =>
+            void handlePeerPolicyChange(pubkey, direction, method, value)
+          }
+          onSignerNameChange={value =>
+            setProfiles(current =>
+              current.map(profile => (profile.id === selectedProfileId ? { ...profile, label: value } : profile)),
             )
-          ) : null}
-
-          {activeDashboardTab === 'permissions' ? (
-            <OperatorPermissionsPanel
-              view={buildPolicyDashboardView(peerPermissionStates, Boolean(runtimeSnapshot?.active))}
-              peerDescription="Live outbound and inbound peer policy state for the active desktop signer."
-              onRefresh={() => void refreshRuntime(selectedProfileId || null)}
-              onPeerPolicyOverrideChange={(pubkey, direction, method, value) =>
-                void handlePeerPolicyChange(pubkey, direction, method, value)
-              }
-            />
-          ) : null}
-
-          {activeDashboardTab === 'settings' ? (
-            <OperatorSettingsPanel
-              hasProfile={Boolean(selectedProfile)}
-              signerName={selectedProfile?.label ?? ''}
-              onSignerNameChange={value =>
-                setProfiles(current =>
-                  current.map(profile => (profile.id === selectedProfileId ? { ...profile, label: value } : profile)),
-                )
-              }
-              relays={selectedRelayProfile?.relays ?? []}
-              newRelayUrl={relayDraft}
-              onNewRelayUrlChange={setRelayDraft}
-              onAddRelay={() => {
-                if (!selectedRelayProfile || !relayDraft.trim()) return;
-                setRelayProfiles(current =>
-                  current.map(profile =>
-                    profile.id === selectedRelayProfile.id
-                      ? { ...profile, relays: [...profile.relays, relayDraft.trim()] }
-                      : profile,
-                  ),
-                );
-                setRelayDraft('');
-              }}
-              onRemoveRelay={relay =>
-                selectedRelayProfile
-                  ? setRelayProfiles(current =>
-                      current.map(profile =>
-                        profile.id === selectedRelayProfile.id
-                          ? { ...profile, relays: profile.relays.filter(item => item !== relay) }
-                          : profile,
-                      ),
-                    )
-                  : undefined
-              }
-              signerSettings={settingsDraft}
-              onSignerSettingNumberChange={(field, value) =>
-                setSettingsDraft(current => ({
-                  ...current,
-                  [field]: Number(value) || current[field],
-                }))
-              }
-              onPeerSelectionStrategyChange={value =>
-                setSettingsDraft(current => ({ ...current, peer_selection_strategy: value }))
-              }
-              onSave={() => void handleSaveOperatorSettings()}
-              maintenanceDescription="Desktop package export, share rotation, and session controls."
-              maintenanceActions={[
-                {
-                  label: 'copy profile',
-                  onClick: () => void handleCopyProfilePackage('bfprofile'),
-                  variant: 'secondary',
-                  disabled: !selectedProfileId,
-                },
-                {
-                  label: 'copy share',
-                  onClick: () => void handleCopyProfilePackage('bfshare'),
-                  variant: 'secondary',
-                  disabled: !selectedProfileId,
-                },
-                {
-                  label: 'logout',
-                  onClick: () => void handleLogout(),
-                  variant: 'outline',
-                  disabled: !selectedProfileId,
-                },
-              ]}
-              extraSections={
-                <>
-                  <ContentCard title="Export Password" description="Used to protect copied profile and share packages.">
-                    <label>
-                      Package password
-                      <input
-                        type="password"
-                        value={packageDraft.packagePassword}
-                        onChange={event =>
-                          setPackageDraft(current => ({ ...current, packagePassword: event.target.value }))
-                        }
-                      />
-                    </label>
-                  </ContentCard>
-                  <ContentCard
-                    title="rotate share"
-                    description="Paste a rotated bfonboard package to replace the current device share in place while keeping this desktop profile context."
-                  >
-                    <div className="igloo-stack">
-                      <label>
-                        Onboarding password
-                        <input
-                          type="password"
-                          value={rotationForm.onboardingPassword}
-                          onChange={event =>
-                            setRotationForm(current => ({
-                              ...current,
-                              onboardingPassword: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        bfonboard
-                        <Textarea
-                          className="min-h-[140px]"
-                          placeholder="Paste bfonboard1..."
-                          value={rotationForm.onboardingPackage}
-                          onChange={event =>
-                            setRotationForm(current => ({
-                              ...current,
-                              onboardingPackage: event.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <div className="igloo-button-row">
-                        <Button type="button" size="sm" variant="secondary" onClick={() => void handleRotateKey()} disabled={!selectedProfileId}>
-                          rotate share
-                        </Button>
-                      </div>
-                    </div>
-                  </ContentCard>
-                  <DesktopSettingsExtras settings={settings} onToggle={(field, checked) => void handleToggleSetting(field, checked)} />
-                </>
-              }
-            />
-          ) : null}
-          </section>
-        </HostFlowShell>
+          }
+          onNewRelayUrlChange={setRelayDraft}
+          onAddRelay={() => {
+            if (!selectedRelayProfile || !relayDraft.trim()) return;
+            setRelayProfiles(current =>
+              current.map(profile =>
+                profile.id === selectedRelayProfile.id
+                  ? { ...profile, relays: [...profile.relays, relayDraft.trim()] }
+                  : profile,
+              ),
+            );
+            setRelayDraft('');
+          }}
+          onRemoveRelay={relay => {
+            if (!selectedRelayProfile) return;
+            setRelayProfiles(current =>
+              current.map(profile =>
+                profile.id === selectedRelayProfile.id
+                  ? { ...profile, relays: profile.relays.filter(item => item !== relay) }
+                  : profile,
+              ),
+            );
+          }}
+          onSignerSettingNumberChange={(field, value) =>
+            setSettingsDraft(current => ({
+              ...current,
+              [field]: Number(value) || current[field],
+            }))
+          }
+          onPeerSelectionStrategyChange={value =>
+            setSettingsDraft(current => ({ ...current, peer_selection_strategy: value }))
+          }
+          onSaveSettings={() => void handleSaveOperatorSettings()}
+          onCopyProfilePackage={(format) => void handleCopyProfilePackage(format)}
+          onLogout={() => void handleLogout()}
+          onPackagePasswordChange={(value) => setPackageDraft(current => ({ ...current, packagePassword: value }))}
+          onRotationFormChange={(field, value) => setRotationForm(current => ({ ...current, [field]: value }))}
+          onRotateKey={() => void handleRotateKey()}
+          onToggleSetting={(field, checked) => void handleToggleSetting(field, checked)}
+        />
       ) : null}
     </PageLayout>
   );

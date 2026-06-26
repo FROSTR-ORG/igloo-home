@@ -17,6 +17,8 @@ describe('home dashboard view model', () => {
         '[info] ping.sweep',
         '[info] echo.published',
         '[warn] plain warning',
+        '  [ERROR] padded error',
+        '[WARN] uppercase warning',
       ],
     });
 
@@ -27,6 +29,8 @@ describe('home dashboard view model', () => {
       ['signer policy', 'policy'],
       ['ping', 'ping'],
       ['echo', 'echo'],
+      ['WARN', 'warning'],
+      ['ERROR', 'danger'],
       ['WARN', 'warning'],
     ]);
   });

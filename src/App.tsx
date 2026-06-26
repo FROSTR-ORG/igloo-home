@@ -1062,7 +1062,7 @@ export default function App() {
       }),
     );
     setRecoveredKey(recovered);
-    setNotice('Group secret key recovered locally and shown in plaintext. Move it to an encrypted store, then leave this screen to clear it.');
+    setNotice('Group secret key recovered locally and masked until you reveal it. Move it to an encrypted store, then leave this screen to clear it.');
   }
 
   async function handleRotateKey() {

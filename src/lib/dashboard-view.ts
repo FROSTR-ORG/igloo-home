@@ -75,15 +75,58 @@ function toPolicyRow(state: HomePeerPermissionState): PeerPolicyRowModel {
 
 function toEventRows(lines: string[] = []): EventLogRowModel[] {
   return lines.map((line, index) => {
-    const isError = line.startsWith('[error]');
-    const isWarn = line.startsWith('[warn]');
     return {
       id: `home-log-${index}`,
-      badgeLabel: isError ? 'ERROR' : isWarn ? 'WARN' : 'INFO',
-      badgeTone: isError ? 'danger' : isWarn ? 'warning' : 'info',
+      badgeLabel: deriveLogBadgeLabel(line),
+      badgeTone: deriveLogBadgeTone(line),
       message: line.replace(/^\[[^\]]+\]\s*/, ''),
     };
   });
+}
+
+const LOG_LEVELS = new Set(['info', 'warn', 'error']);
+
+function deriveLogDomain(line: string): string | null {
+  let rest = line.trim();
+
+  for (;;) {
+    const bracketMatch = rest.match(/^\[([^\]]+)\]\s*/);
+    if (!bracketMatch) break;
+
+    const token = normalizeLogDomain(bracketMatch[1]);
+    rest = rest.slice(bracketMatch[0].length);
+    if (!LOG_LEVELS.has(token)) return token;
+  }
+
+  const structuredMatch = rest.match(/^(.+?)\.[A-Za-z0-9_-]+(?:\s|$)/);
+  return structuredMatch ? normalizeLogDomain(structuredMatch[1]) : null;
+}
+
+function normalizeLogDomain(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'policy') return 'signer policy';
+  return normalized;
+}
+
+function deriveLogBadgeLabel(line: string): string {
+  const domain = deriveLogDomain(line);
+  if (domain) return domain;
+  if (line.startsWith('[error]')) return 'ERROR';
+  if (line.startsWith('[warn]')) return 'WARN';
+  return 'INFO';
+}
+
+function deriveLogBadgeTone(line: string): EventLogRowModel['badgeTone'] {
+  if (line.startsWith('[error]')) return 'danger';
+  const domain = deriveLogDomain(line);
+  if (domain === 'sync') return 'sync';
+  if (domain === 'sign') return 'success';
+  if (domain === 'ecdh') return 'ecdh';
+  if (domain === 'ping') return 'ping';
+  if (domain === 'echo') return 'echo';
+  if (domain === 'signer policy') return 'policy';
+  if (line.startsWith('[warn]')) return 'warning';
+  return 'info';
 }
 
 export function buildSignerDashboardView(input: {

@@ -100,6 +100,13 @@ function toEventRows(lines: string[] = []): EventLogRowModel[] {
 
 const LOG_LEVELS = new Set(['info', 'warn', 'error']);
 
+function deriveLeadingLogLevel(line: string): 'info' | 'warn' | 'error' | null {
+  const bracketMatch = line.trim().match(/^\[([^\]]+)\]/);
+  if (!bracketMatch) return null;
+  const token = normalizeLogDomain(bracketMatch[1]);
+  return LOG_LEVELS.has(token) ? (token as 'info' | 'warn' | 'error') : null;
+}
+
 function deriveLogDomain(line: string): string | null {
   let rest = line.trim();
 
@@ -124,14 +131,16 @@ function normalizeLogDomain(value: string): string {
 
 function deriveLogBadgeLabel(line: string): string {
   const domain = deriveLogDomain(line);
+  const level = deriveLeadingLogLevel(line);
   if (domain) return domain;
-  if (line.startsWith('[error]')) return 'ERROR';
-  if (line.startsWith('[warn]')) return 'WARN';
+  if (level === 'error') return 'ERROR';
+  if (level === 'warn') return 'WARN';
   return 'INFO';
 }
 
 function deriveLogBadgeTone(line: string): EventLogRowModel['badgeTone'] {
-  if (line.startsWith('[error]')) return 'danger';
+  const level = deriveLeadingLogLevel(line);
+  if (level === 'error') return 'danger';
   const domain = deriveLogDomain(line);
   if (domain === 'sync') return 'sync';
   if (domain === 'sign') return 'success';
@@ -139,7 +148,7 @@ function deriveLogBadgeTone(line: string): EventLogRowModel['badgeTone'] {
   if (domain === 'ping') return 'ping';
   if (domain === 'echo') return 'echo';
   if (domain === 'signer policy') return 'policy';
-  if (line.startsWith('[warn]')) return 'warning';
+  if (level === 'warn') return 'warning';
   return 'info';
 }
 

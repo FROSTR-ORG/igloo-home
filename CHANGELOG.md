@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, adapted for this repository.
 
 ## [Unreleased]
 
+### Added
+- Unsigned beta artifact staging is now coordinated by the parent workspace
+  release primitive, including checksums and manifest metadata for macOS and
+  Linux AppImage candidates.
+
 ### Changed
 - The desktop host now uses the same landing, load, onboard, and dashboard shell structure as `igloo-pwa`.
 - Stored profiles now live directly on the landing page instead of a separate inventory-first desktop view.

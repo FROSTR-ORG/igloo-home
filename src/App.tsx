@@ -1047,7 +1047,7 @@ export default function App() {
     setActiveDashboardTab('signer');
   }
 
-  function updateRecoverSource(index: number, field: 'packageText' | 'packagePassword', value: string) {
+  function updateRecoverSource(index: number, field: keyof SharedRecoverSource, value: string) {
     setRecoverSources((current) =>
       current.map((source, sourceIndex) =>
         sourceIndex === index ? { ...source, [field]: value } : source,

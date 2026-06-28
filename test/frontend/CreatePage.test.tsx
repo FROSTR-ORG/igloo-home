@@ -10,7 +10,7 @@ describe('CreatePage', () => {
       <CreatePage
         createForm={{ mode: 'rotate', groupName: 'Treasury Signing Group', threshold: '2', count: '3', sourceProfileId: '' }}
         availableProfiles={[{ id: 'alice', label: 'Alice Laptop' }]}
-        rotationSources={[{ packageText: '', packagePassword: '' }]}
+        rotationSources={[]}
         generatedKeyset={null}
         saveForms={{}}
         selectedMemberIdx={null}
@@ -31,8 +31,8 @@ describe('CreatePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'New Keyset' }));
     expect(onChangeCreateForm).toHaveBeenCalledWith('mode', 'new');
-    expect(screen.getByRole('button', { name: 'Add bfshare Source' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Add bfshare Source' }));
+    expect(screen.getByRole('button', { name: 'Add Source' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Add Source' }));
     expect(onAddRotationSource).toHaveBeenCalledTimes(1);
   });
 });

@@ -777,21 +777,26 @@ export default function App() {
     if (createForm.mode === 'rotate' && !createForm.sourceProfileId) {
       throw new Error('select the source profile whose keyset you are rotating');
     }
-    const generated = await run(
-      createForm.mode === 'rotate' ? 'rotating keyset' : 'generating keyset',
-      () =>
-        createForm.mode === 'rotate'
-          ? createRotatedKeyset({
-              threshold,
-              count,
-              sourceProfileId: createForm.sourceProfileId,
-              sources: rotationSources.map((source) => ({
-                packageText: source.packageText,
-                packagePassword: source.packagePassword,
-              })),
-            })
-          : createGeneratedKeyset(groupName, threshold, count),
-    );
+    let generated: GeneratedKeyset;
+    try {
+      generated = await run(
+        createForm.mode === 'rotate' ? 'rotating keyset' : 'generating keyset',
+        () =>
+          createForm.mode === 'rotate'
+            ? createRotatedKeyset({
+                threshold,
+                count,
+                sourceProfileId: createForm.sourceProfileId,
+                sources: rotationSources.map((source) => ({
+                  packageText: source.packageText,
+                  packagePassword: source.packagePassword,
+                })),
+              })
+            : createGeneratedKeyset(groupName, threshold, count),
+      );
+    } catch {
+      return;
+    }
     setGeneratedKeyset(generated);
     const sourceProfile =
       createForm.mode === 'rotate'
@@ -1054,13 +1059,18 @@ export default function App() {
     if (!recoverProfileId) {
       throw new Error('select a local profile to supply the group package');
     }
-    const recovered = await run('recovering group key', () =>
-      recoverGroupKey({
-        profileId: recoverProfileId,
-        devicePassphrase: recoverDevicePassphrase,
-        sources: recoverSources.filter((source) => source.packageText.trim().length > 0),
-      }),
-    );
+    let recovered: RecoveredGroupKey;
+    try {
+      recovered = await run('recovering group key', () =>
+        recoverGroupKey({
+          profileId: recoverProfileId,
+          devicePassphrase: recoverDevicePassphrase,
+          sources: recoverSources.filter((source) => source.packageText.trim().length > 0),
+        }),
+      );
+    } catch {
+      return;
+    }
     setRecoveredKey(recovered);
     setNotice('Group secret key recovered locally and masked until you reveal it. Move it to an encrypted store, then leave this screen to clear it.');
   }
@@ -1093,6 +1103,7 @@ export default function App() {
     profileId = selectedProfileId,
     sessionPassphrase = passphrase,
     nextView: ViewKey = 'dashboard',
+    options: { rethrowStartFailure?: boolean } = {},
   ) {
     // Surface validation failures in the error banner rather than throwing into
     // the fire-and-forget `void handleStartProfileSession()` call sites (where
@@ -1117,6 +1128,9 @@ export default function App() {
         }),
       );
     } catch (err) {
+      if (options.rethrowStartFailure) {
+        throw err;
+      }
       // The daemon never came up to be queried, so surface the failure as the
       // full-panel load-failed screen on the dashboard (Retry) in addition to
       // the transient error banner `run()` already set. The failure is fully
@@ -1200,7 +1214,9 @@ export default function App() {
     }
     const sessionPassphrase = providedPassphrase ?? passphrase;
     setPassphrase(sessionPassphrase);
-    await handleStartProfileSession(profileId, sessionPassphrase);
+    await handleStartProfileSession(profileId, sessionPassphrase, 'dashboard', {
+      rethrowStartFailure: Boolean(providedPassphrase),
+    });
   }
 
   async function handleStopProfileSession() {

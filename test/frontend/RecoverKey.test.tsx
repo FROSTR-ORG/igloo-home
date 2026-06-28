@@ -191,4 +191,19 @@ describe('igloo-home recover-key view', () => {
     });
     expect(document.body.textContent).not.toContain('nsec1leavescrubsecretvalue');
   });
+
+  it('surfaces recover decrypt failures without rendering recovered material', async () => {
+    apiMocks.recoverGroupKey.mockRejectedValueOnce(new Error('Incorrect passphrase.'));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Recover Key' }));
+
+    expect(await screen.findByText('Incorrect passphrase.')).toBeInTheDocument();
+    expect(apiMocks.recoverGroupKey).toHaveBeenCalledWith({
+      profileId: 'alice-laptop',
+      devicePassphrase: 'device-pass',
+      sources: [{ packageText: 'bfshare1bobsource', packagePassword: 'bob-pw' }],
+    });
+    expect(screen.queryByText(/Group public key:/)).not.toBeInTheDocument();
+  });
 });

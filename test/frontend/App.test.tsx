@@ -258,6 +258,60 @@ describe('igloo-home landing shell', () => {
     expect(within(loadFailed).getByText(/daemon failed to start/i)).toBeInTheDocument();
   });
 
+  it('keeps unlock passphrase failures in the landing unlock modal', async () => {
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'landing',
+      runtimeSnapshot: null,
+      passphrase: '',
+    };
+    apiMocks.startProfileSession.mockRejectedValueOnce(new Error('Incorrect passphrase.'));
+
+    render(<App />);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Unlock' })[0]);
+    fireEvent.change(screen.getByTestId('welcome-unlock-password'), {
+      target: { value: 'wrong-passphrase' },
+    });
+    fireEvent.click(screen.getByTestId('welcome-unlock-submit'));
+
+    expect(await screen.findByText('Incorrect password. Please try again.')).toBeInTheDocument();
+    expect(apiMocks.startProfileSession).toHaveBeenCalledWith({
+      profileId: 'alice-laptop',
+      passphrase: 'wrong-passphrase',
+    });
+    expect(screen.queryByTestId('dashboard-load-failed')).not.toBeInTheDocument();
+  });
+
+  it('surfaces rotate package failures in the app error banner', async () => {
+    currentVisualScenario.value = {
+      ...currentVisualScenario.value,
+      activeView: 'create',
+      createForm: {
+        mode: 'rotate',
+        groupName: 'Treasury Group',
+        threshold: '2',
+        count: '3',
+        sourceProfileId: 'alice-laptop',
+      },
+      rotationSources: [{ packageText: 'bfshare1corrupt', packagePassword: 'source-pass' }],
+      generatedKeyset: null,
+    };
+    apiMocks.createRotatedKeyset.mockRejectedValueOnce(new Error('Invalid package: corrupted'));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByTestId('rotate-submit'));
+
+    expect(await screen.findByText('Invalid package: corrupted')).toBeInTheDocument();
+    expect(apiMocks.createRotatedKeyset).toHaveBeenCalledWith({
+      threshold: 2,
+      count: 3,
+      sourceProfileId: 'alice-laptop',
+      sources: [{ packageText: 'bfshare1corrupt', packagePassword: 'source-pass' }],
+    });
+  });
+
   it('clears the peer refresh summary after the signer stops', async () => {
     const activeSnapshot = makeRuntimeSnapshot(true);
     const stoppedSnapshot = makeRuntimeSnapshot(false);
